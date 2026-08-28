@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: teen-wellbeing-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: teen_wellbeing
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: teen-wellbeing-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/teen_wellbeing
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: teen-wellbeing-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

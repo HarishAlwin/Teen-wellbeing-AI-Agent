@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+:root {
+  --bg-space: #030712;
+  --bg-hud: rgba(6, 11, 26, 0.75);
+  --bg-hud-elevated: rgba(10, 18, 42, 0.85);
+  
+  --neon-cyan: #00f0ff;
+  --neon-blue: #3b82f6;
+  --neon-purple: #a855f7;
+  --neon-emerald: #10b981;
+  --neon-rose: #f43f5e;
+  --neon-amber: #f59e0b;
+  
+  --border-hud: rgba(0, 240, 255, 0.2);
+  --border-hud-subtle: rgba(255, 255, 255, 0.08);
+  --border-hud-bright: rgba(0, 240, 255, 0.6);
+  
+  --glow-cyan: 0 0 25px rgba(0, 240, 255, 0.35);
+  --glow-core: 0 0 50px rgba(0, 240, 255, 0.5), inset 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-space);
+  color: #f1f5f9;
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  background-image: 
+    linear-gradient(to right, rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 240, 255, 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 85% 50%, rgba(168, 85, 247, 0.08), transparent);
+  background-size: 40px 40px, 40px 40px, 100% 100%, 100% 100%;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cybernetic HUD Panels */
+.hud-panel {
+  background: var(--bg-hud);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-hud);
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(0, 240, 255, 0.2);
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hud-panel:hover {
+  border-color: var(--border-hud-bright);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.15), inset 0 1px 0 0 rgba(0, 240, 255, 0.4);
+}
+
+.hud-pill {
+  background: rgba(0, 240, 255, 0.06);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: 9999px;
+  color: #38bdf8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.05em;
+  transition: all 0.2s ease;
+}
+
+.hud-pill:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.6);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
+}
+
+/* Jarvis Arc Reactor Keyframes */
+@keyframes spin-cw {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes spin-ccw {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes jarvis-core-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 30px rgba(0, 240, 255, 0.4), inset 0 0 20px rgba(0, 240, 255, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 60px rgba(0, 240, 255, 0.8), inset 0 0 35px rgba(0, 240, 255, 0.6);
+  }
+}
+
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes wave-glow {
+  0%, 100% {
+    opacity: 0.5;
+    height: 8px;
+  }
+  50% {
+    opacity: 1;
+    height: 38px;
+    filter: drop-shadow(0 0 8px #00f0ff);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-cw 20s linear infinite;
+}
+
+.animate-spin-reverse-slow {
+  animation: spin-ccw 14s linear infinite;
+}
+
+.animate-jarvis-pulse {
+  animation: jarvis-core-pulse 3s ease-in-out infinite;
+}
+
+.animate-radar {
+  animation: radar-sweep 4s linear infinite;
+}
+
+.wave-bar-hud {
+  transform-origin: bottom;
+  animation: wave-glow 1.2s ease-in-out infinite;
+}
+
+/* Futuristic Monospace HUD readouts */
+.font-mono-hud {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Glowing Neon Texts */
+.text-neon-cyan {
+  color: #00f0ff;
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+}
+
+.text-neon-purple {
+  color: #c084fc;
+  text-shadow: 0 0 10px rgba(192, 132, 252, 0.6);
+}
+
+.text-neon-rose {
+  color: #fb7185;
+  text-shadow: 0 0 10px rgba(251, 113, 133, 0.6);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-space);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 8px #00f0ff;
+}
