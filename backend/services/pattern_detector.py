@@ -1,10 +1,17 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 class PatternDetector:
     """
     Identifies cross-dimensional linkages, behavioral deviations from baseline,
     and temporal trends in a teenager's life.
+
+    Task 3: detect_patterns() now also accepts llm_pattern_observations — a list of
+    patterns proposed by the LLM (from llm_agent.py). These are merged into the returned
+    list alongside rule-based patterns, each tagged with a "source" field:
+      - "source": "rule_based"  — from the deterministic rules below (always run)
+      - "source": "llm"         — proposed by Gemini based on conversation analysis
+    This makes it clear to downstream consumers which patterns were detected how.
     """
 
     @classmethod
@@ -14,10 +21,13 @@ class PatternDetector:
         baseline_scores: Dict[str, float],
         signals: Dict[str, List[str]],
         emotions: List[str],
-        recent_history_scores: List[Dict[str, float]] = None
+        recent_history_scores: List[Dict[str, float]] = None,
+        # Task 3: LLM-proposed patterns from llm_agent.py
+        llm_pattern_observations: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Returns detected patterns with dimensions involved, severity, title, and descriptive explanation.
+        Each pattern has a "source" field: "rule_based" or "llm".
         """
         patterns = []
 
@@ -34,7 +44,8 @@ class PatternDetector:
                 "category": "cross_dimensional",
                 "severity": "high" if "exhausted" in emotions or "overwhelmed" in emotions else "medium",
                 "dimensions_involved": ["academic", "digital", "lifestyle"],
-                "evidence_snippets": ["Study workload causing stress", "Compulsive late-night screen time", "Fatigue and sleep reduction"]
+                "evidence_snippets": ["Study workload causing stress", "Compulsive late-night screen time", "Fatigue and sleep reduction"],
+                "source": "rule_based",
             })
 
         if lifestyle_deficit and social_withdrawal:
@@ -44,7 +55,8 @@ class PatternDetector:
                 "category": "cross_dimensional",
                 "severity": "medium",
                 "dimensions_involved": ["lifestyle", "social"],
-                "evidence_snippets": ["Low energy routines", "Decreased social interaction and feelings of isolation"]
+                "evidence_snippets": ["Low energy routines", "Decreased social interaction and feelings of isolation"],
+                "source": "rule_based",
             })
 
         # 2. Family Pressure & Academic Anxiety Link
@@ -56,7 +68,8 @@ class PatternDetector:
                 "category": "cross_dimensional",
                 "severity": "medium",
                 "dimensions_involved": ["family", "academic"],
-                "evidence_snippets": ["Heightened parental expectations", "Anxiety over test scores"]
+                "evidence_snippets": ["Heightened parental expectations", "Anxiety over test scores"],
+                "source": "rule_based",
             })
 
         # 3. Sudden Deviation from Baseline
@@ -69,7 +82,8 @@ class PatternDetector:
                     "category": "deviation",
                     "severity": "medium",
                     "dimensions_involved": [dim],
-                    "evidence_snippets": [f"{dim.capitalize()} score dropped {base - score:.1f} pts below normal baseline"]
+                    "evidence_snippets": [f"{dim.capitalize()} score dropped {base - score:.1f} pts below normal baseline"],
+                    "source": "rule_based",
                 })
 
         # 4. Multi-session Trend Evaluation (if history available)
@@ -84,7 +98,8 @@ class PatternDetector:
                         "category": "trend",
                         "severity": "high" if vals[2] < 45 else "medium",
                         "dimensions_involved": [dim],
-                        "evidence_snippets": [f"Steady drop from {vals[0]:.0f} to {vals[2]:.0f} across recent checkpoints"]
+                        "evidence_snippets": [f"Steady drop from {vals[0]:.0f} to {vals[2]:.0f} across recent checkpoints"],
+                        "source": "rule_based",
                     })
                 elif vals[0] < vals[1] < vals[2] and (vals[2] - vals[0]) >= 10.0:
                     patterns.append({
@@ -93,7 +108,28 @@ class PatternDetector:
                         "category": "trend",
                         "severity": "low",
                         "dimensions_involved": [dim],
-                        "evidence_snippets": [f"Improvement from {vals[0]:.0f} to {vals[2]:.0f}"]
+                        "evidence_snippets": [f"Improvement from {vals[0]:.0f} to {vals[2]:.0f}"],
+                        "source": "rule_based",
                     })
+
+        # ── Task 3: Merge LLM-proposed pattern observations ────────────────────
+        # LLM patterns are additive to the rule-based set. We deduplicate by title
+        # (case-insensitive) so LLM does not re-surface what rules already caught.
+        if llm_pattern_observations:
+            existing_titles = {p["title"].lower() for p in patterns}
+            for llm_pat in llm_pattern_observations:
+                title = llm_pat.get("title", "").strip()
+                if not title or title.lower() in existing_titles:
+                    continue  # Skip duplicates or empty entries
+                patterns.append({
+                    "title": title,
+                    "description": llm_pat.get("description", ""),
+                    "category": llm_pat.get("category", "cross_dimensional"),
+                    "severity": llm_pat.get("severity", "medium"),
+                    "dimensions_involved": llm_pat.get("dimensions_involved", []),
+                    "evidence_snippets": llm_pat.get("evidence_snippets", []),
+                    "source": "llm",  # Clearly marks this as LLM-observed, not rule-derived
+                })
+                existing_titles.add(title.lower())
 
         return patterns

@@ -3,6 +3,7 @@ from .profile import WellbeingProfile, DimensionScore
 from .message import Message, Conversation
 from .graph import GraphNode, GraphEdge
 from .pattern import DetectedPattern, Intervention, Feedback
+from .escalation import Escalation
 
 __all__ = [
     "User", "Session",
@@ -10,4 +11,5 @@ __all__ = [
     "Message", "Conversation",
     "GraphNode", "GraphEdge",
     "DetectedPattern", "Intervention", "Feedback",
+    "Escalation",
 ]

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from database import engine, Base
 import models
-from routers import chat, speech, dashboard, profile
+from routers import chat, speech, dashboard, profile, alerts
 
 load_dotenv()
 
@@ -35,6 +35,7 @@ app.include_router(chat.router)
 app.include_router(speech.router)
 app.include_router(dashboard.router)
 app.include_router(profile.router)
+app.include_router(alerts.router)
 
 @app.get("/")
 def read_root():
