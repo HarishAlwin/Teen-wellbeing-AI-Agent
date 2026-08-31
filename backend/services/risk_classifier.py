@@ -85,19 +85,36 @@ HELPLINES = {
 
 # Rule-based safety trigger patterns
 CRISIS_PATTERNS = [
-    r"\b(suicid|kill myself|want to die|end my life|end it all|better off dead|hang myself|slit my wrist|take all my pills|overdose)\b",
-    r"\b(can't go on living|no reason to live|don't want to wake up|goodbye forever|hurting myself|cut myself|self harm|self-harm)\b"
+    r"\b(suicid|kill myself|want to die|wanna die|going to die|gonna die|"
+    r"i('m| am) dying|end my life|end it all|better off dead|hang myself|"
+    r"slit my wrist|take all my pills|overdose)\b",
+    r"\b(can't go on living|no reason to live|no point in living|"
+    r"don't want to (wake up|be alive|be here)|wish i was dead|wish i were dead|"
+    r"goodbye forever|hurting myself|cut myself|self harm|self-harm)\b"
 ]
 
 HIGH_CONCERN_PATTERNS = [
-    r"\b(nobody cares|completely hopeless|worthless|can't take this anymore|hate my life|trapped with no way out|nobody loves me|everyone hates me)\b",
-    r"\b(panic attack|hyperventilating|can't breathe|shaking uncontrollably|starving myself|haven't eaten in days|purging)\b",
-    r"\b(abused|being hit|someone is hurting me|threatened|assaulted|unsafe at home|stalked)\b"
+    r"\b(nobody cares|completely hopeless|worthless|can't take this anymore|hate my life|"
+    r"trapped with no way out|nobody loves me|everyone hates me|no one would notice if i (was|were) gone|"
+    r"what's the point of anything|i give up|i'm done trying|life isn't worth it|"
+    r"nothing matters anymore|i'm a burden|everyone would be better off without me)\b",
+    r"\b(panic attack|hyperventilating|can't breathe|shaking uncontrollably|starving myself|"
+    r"haven't eaten in days|purging|throwing up on purpose|binge and purge|"
+    r"can't stop crying|breaking down|falling apart|losing control of myself)\b",
+    r"\b(abused|being hit|someone is hurting me|threatened|assaulted|unsafe at home|stalked|"
+    r"scared of my (dad|mom|parent|father|mother|stepdad|stepmom)|locked (in|out) of my room|"
+    r"afraid to go home|someone touched me|forced (me|to))\b"
 ]
 
 CONCERNING_PATTERNS = [
-    r"\b(so overwhelmed|burnout|exhausted|failing everything|ruined my future|crying every day|can't sleep at all|no friends|bullied)\b",
-    r"\b(parents scream at me|feel so lonely|isolated|terrified of exams|freaking out|hopeless about grades|scared to go to school)\b"
+    r"\b(so overwhelmed|burnout|exhausted|failing everything|ruined my future|crying every day|"
+    r"can't sleep at all|no friends|bullied|falling behind in everything|can't focus on anything|"
+    r"everything feels pointless|nothing i do is good enough|constantly anxious|"
+    r"dread going to school|dread waking up)\b",
+    r"\b(parents scream at me|feel so lonely|isolated|terrified of exams|freaking out|"
+    r"hopeless about grades|scared to go to school|parents fighting all the time|"
+    r"no one understands me|left out of everything|excluded from|"
+    r"pushed away my friends|stopped talking to everyone)\b"
 ]
 
 class RiskClassifier:

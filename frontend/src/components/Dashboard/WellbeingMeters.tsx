@@ -20,7 +20,7 @@ const DIMENSION_CONFIG = {
   social: {
     label: "Social",
     subtitle: "Friends & Belonging",
-    icon: "👥",
+    icon: "SOC",
     color: "from-sky-400 to-blue-600",
     glowColor: "rgba(56, 189, 248, 0.4)",
     border: "border-sky-500/30",
@@ -30,7 +30,7 @@ const DIMENSION_CONFIG = {
   family: {
     label: "Family",
     subtitle: "Home Peace & Boundaries",
-    icon: "🏡",
+    icon: "FAM",
     color: "from-purple-400 to-pink-600",
     glowColor: "rgba(192, 132, 252, 0.4)",
     border: "border-purple-500/30",
@@ -40,7 +40,7 @@ const DIMENSION_CONFIG = {
   academic: {
     label: "Academic",
     subtitle: "Exams, Workload & Goals",
-    icon: "📚",
+    icon: "ACG",
     color: "from-rose-400 to-orange-500",
     glowColor: "rgba(251, 113, 133, 0.4)",
     border: "border-rose-500/30",
@@ -50,7 +50,7 @@ const DIMENSION_CONFIG = {
   digital: {
     label: "Digital",
     subtitle: "Screen Time & Feeds",
-    icon: "📱",
+    icon: "DIG",
     color: "from-amber-400 to-yellow-500",
     glowColor: "rgba(251, 191, 36, 0.4)",
     border: "border-amber-500/30",
@@ -60,7 +60,7 @@ const DIMENSION_CONFIG = {
   lifestyle: {
     label: "Lifestyle",
     subtitle: "Sleep, Meals & Energy",
-    icon: "🌙",
+    icon: "LST",
     color: "from-emerald-400 to-teal-500",
     glowColor: "rgba(52, 211, 153, 0.4)",
     border: "border-emerald-500/30",
@@ -91,10 +91,11 @@ export default function WellbeingMeters({ dimensions }: WellbeingMetersProps) {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-md"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-xs font-extrabold font-mono-hud tracking-wider shadow-md"
                   style={{
                     backgroundColor: `${cfg.accent}15`,
                     border: `1px solid ${cfg.accent}30`,
+                    color: cfg.accent,
                   }}
                 >
                   {cfg.icon}
@@ -150,7 +151,7 @@ export default function WellbeingMeters({ dimensions }: WellbeingMetersProps) {
                     isLow ? "text-amber-400" : "text-emerald-400"
                   }`}
                 >
-                  {isLow ? "⚡ Needs Care" : "🌿 In Harmony"}
+                  {isLow ? "! Needs Care" : "+ In Harmony"}
                 </span>
               </div>
             </div>

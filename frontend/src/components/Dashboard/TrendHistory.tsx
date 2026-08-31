@@ -20,31 +20,31 @@ const LINE_CONFIG: Record<string, { stroke: string; label: string; icon: string;
   social: {
     stroke: "#38bdf8",
     label: "Social",
-    icon: "👥",
+    icon: "SOC",
     fillGradient: "rgba(56, 189, 248, 0.15)",
   },
   family: {
     stroke: "#c084fc",
     label: "Family",
-    icon: "🏡",
+    icon: "FAM",
     fillGradient: "rgba(192, 132, 252, 0.15)",
   },
   academic: {
     stroke: "#fb7185",
     label: "Academic",
-    icon: "📚",
+    icon: "ACG",
     fillGradient: "rgba(251, 113, 133, 0.15)",
   },
   digital: {
     label: "Digital",
     stroke: "#fbbf24",
-    icon: "📱",
+    icon: "DIG",
     fillGradient: "rgba(251, 191, 36, 0.15)",
   },
   lifestyle: {
     stroke: "#34d399",
     label: "Lifestyle",
-    icon: "🌙",
+    icon: "LST",
     fillGradient: "rgba(52, 211, 153, 0.15)",
   },
 };
@@ -117,7 +117,6 @@ export default function TrendHistory({ trends }: TrendHistoryProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">📈</span>
             <h3 className="font-bold text-white text-base">Wellbeing Trajectory</h3>
           </div>
           <p className="text-xs text-slate-400">
@@ -275,7 +274,7 @@ export default function TrendHistory({ trends }: TrendHistoryProps) {
       </div>
 
       <div className="mt-2 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-        <span>💡 Tap dimension badges above to highlight individual trajectory</span>
+        <span>Tap dimension badges to highlight individual trajectory</span>
         <span>Target Balance: 70+</span>
       </div>
     </div>

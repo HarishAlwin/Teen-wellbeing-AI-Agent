@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getAuthHeaders } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -66,7 +67,11 @@ export default function AlertsPage() {
       setLoading(true);
       const params = new URLSearchParams({ limit: "50", offset: "0" });
       if (filter !== "all") params.set("risk_level", filter);
-      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`);
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`, { headers });
+      if (res.status === 403) {
+        throw new Error("Access restricted: Counselor role required. Please log in with a counselor account.");
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: AlertsResponse = await res.json();
       setAlerts(data.alerts);
@@ -88,9 +93,10 @@ export default function AlertsPage() {
   const updateStatus = async (alertId: string, newStatus: string) => {
     setUpdatingId(alertId);
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch(
         `${API_BASE}/alerts/${alertId}/status?new_status=${newStatus}`,
-        { method: "PATCH" }
+        { method: "PATCH", headers }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchAlerts();
@@ -136,7 +142,7 @@ export default function AlertsPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 24, fontSize: 11, color: "#4a9eff" }}>
           {immediateCount > 0 && (
             <span style={{ color: "#ff2d55", fontWeight: 700, letterSpacing: 1 }}>
-              ⚠ {immediateCount} IMMEDIATE SAFETY
+              [!] {immediateCount} IMMEDIATE SAFETY
             </span>
           )}
           <span>{pendingCount} PENDING</span>

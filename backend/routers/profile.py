@@ -7,6 +7,7 @@ import uuid
 from database import get_db
 from models.user import User
 from models.profile import WellbeingProfile
+from auth import get_current_user
 
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
 
@@ -16,11 +17,19 @@ class ProfileUpdateRequest(BaseModel):
     preferences: Optional[Dict[str, Any]] = None
 
 @router.get("/{user_id}")
-async def get_profile(user_id: str, db: Session = Depends(get_db)):
+async def get_profile(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         u_uuid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    # Users can only view their own profile; counselors can view any profile
+    if current_user.role not in ("counselor",) and current_user.id != u_uuid:
+        raise HTTPException(status_code=403, detail="You can only view your own profile.")
 
     user = db.query(User).filter(User.id == u_uuid).first()
     if not user:
@@ -46,11 +55,20 @@ async def get_profile(user_id: str, db: Session = Depends(get_db)):
     }
 
 @router.put("/{user_id}")
-async def update_profile(user_id: str, req: ProfileUpdateRequest, db: Session = Depends(get_db)):
+async def update_profile(
+    user_id: str,
+    req: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
         u_uuid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    # Users can only update their own profile
+    if current_user.id != u_uuid:
+        raise HTTPException(status_code=403, detail="You can only update your own profile.")
 
     user = db.query(User).filter(User.id == u_uuid).first()
     if not user:
@@ -67,3 +85,4 @@ async def update_profile(user_id: str, req: ProfileUpdateRequest, db: Session = 
 
     db.commit()
     return {"status": "success", "message": "Profile updated successfully"}
+

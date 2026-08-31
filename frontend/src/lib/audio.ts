@@ -1,5 +1,5 @@
 /**
- * Audio Recording and Speech Utilities
+ * Audio Recording and Speech Utilities with Hands-Free Conversational Voice Loop
  */
 
 let mediaRecorder: MediaRecorder | null = null;
@@ -9,7 +9,7 @@ let activeAudioElement: HTMLAudioElement | null = null;
 export async function startRecording(): Promise<MediaStream> {
   audioChunks = [];
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  
+
   // Prefer webm or mp4 audio
   const mimeType = MediaRecorder.isTypeSupported("audio/webm")
     ? "audio/webm"
@@ -18,7 +18,7 @@ export async function startRecording(): Promise<MediaStream> {
     : "";
 
   mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  
+
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
       audioChunks.push(event.data);
@@ -54,12 +54,21 @@ export function stopRecording(): Promise<Blob> {
 }
 
 /**
- * Native Web Speech API speech recognition for instant, low-latency live STT
+ * Native Web Speech API speech recognition with continuous listening
+ * and optional silence auto-complete for hands-free speech communication.
+ *
+ * Parameters:
+ *  - onResult: called whenever new transcript is received
+ *  - onError: called on non-fatal/fatal errors
+ *  - onSpeechPause: called after silenceTimeoutMs of no speech when words were spoken
+ *  - silenceTimeoutMs: delay in ms to trigger auto-submit (default: 1800ms)
  */
 export function startBrowserSpeechRecognition(
-  onResult: (transcript: string) => void,
-  onError: (err: any) => void
-): { stop: () => void } | null {
+  onResult: (transcript: string, isFinal: boolean) => void,
+  onError: (err: any) => void,
+  onSpeechPause?: (transcript: string) => void,
+  silenceTimeoutMs: number = 1800
+): { stop: () => void; getTranscript: () => string; resetTranscript: () => void } | null {
   const SpeechRecognition =
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -67,33 +76,115 @@ export function startBrowserSpeechRecognition(
     return null;
   }
 
-  const recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = "en-US";
+  let shouldListen = true;
+  let committedTranscript = "";
+  let currentInterim = "";
+  let recognition: any = null;
+  let silenceTimer: any = null;
 
-  recognition.onresult = (event: any) => {
-    let transcript = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      transcript += event.results[i][0].transcript;
+  const resetSilenceTimer = () => {
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
     }
-    onResult(transcript);
+
+    const fullText = (committedTranscript + " " + currentInterim).trim();
+    if (fullText.length > 0 && onSpeechPause && shouldListen) {
+      silenceTimer = setTimeout(() => {
+        const textToSubmit = (committedTranscript + " " + currentInterim).trim();
+        if (textToSubmit.length > 0 && shouldListen) {
+          onSpeechPause(textToSubmit);
+        }
+      }, silenceTimeoutMs);
+    }
   };
 
-  recognition.onerror = (event: any) => {
-    onError(event.error);
+  const createAndStart = () => {
+    if (!shouldListen) return;
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          committedTranscript += (committedTranscript ? " " : "") + result[0].transcript.trim();
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+
+      currentInterim = interimTranscript;
+      const fullTranscript = (committedTranscript + " " + currentInterim).trim();
+      onResult(fullTranscript, interimTranscript === "");
+
+      // Reset auto-submit timer on new spoken words
+      resetSilenceTimer();
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error === "no-speech") {
+        return;
+      }
+      if (event.error === "aborted") {
+        return;
+      }
+      onError(event.error);
+    };
+
+    recognition.onend = () => {
+      if (shouldListen) {
+        try {
+          recognition.start();
+        } catch {
+          setTimeout(() => {
+            if (shouldListen) {
+              try { createAndStart(); } catch { /* ignore */ }
+            }
+          }, 250);
+        }
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      // ignore already started
+    }
   };
 
-  recognition.start();
+  createAndStart();
 
   return {
     stop: () => {
-      try {
-        recognition.stop();
-      } catch (e) {
-        // ignore
+      shouldListen = false;
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
       }
-    }
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch {
+          // ignore
+        }
+      }
+    },
+    getTranscript: () => (committedTranscript + " " + currentInterim).trim(),
+    resetTranscript: () => {
+      committedTranscript = "";
+      currentInterim = "";
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+    },
   };
 }
 
@@ -125,7 +216,6 @@ export function playSpokenResponse(
     };
 
     audio.onerror = () => {
-      // Fallback to browser synthesis on audio error
       speakWithBrowserTTS(fallbackText, onStart, onEnd);
     };
 
@@ -150,11 +240,11 @@ export function speakWithBrowserTTS(
   window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.95; // Slightly slower, calming pace
+  utterance.rate = 0.98; // Natural conversational cadence
   utterance.pitch = 1.0;
   utterance.lang = "en-US";
 
-  // Pick a warm voice if available
+  // Pick a warm natural voice if available
   const voices = window.speechSynthesis.getVoices();
   const naturalVoice = voices.find(
     (v) =>

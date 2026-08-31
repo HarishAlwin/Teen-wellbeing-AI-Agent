@@ -5,8 +5,9 @@ import {
   sendMessage,
   transcribeAudio,
   synthesizeSpeech,
-  submitFeedback,
+  analyzeImageDocument,
   ChatResponse,
+  OCRResponse,
 } from "@/lib/api";
 import {
   startRecording,
@@ -24,6 +25,12 @@ interface MessageItem {
   timestamp: string;
   emotions?: string[];
   riskLevel?: string;
+  ocrDetails?: {
+    filename: string;
+    documentType: string;
+    extractedText: string;
+    summary: string;
+  };
   intervention?: {
     id: string;
     title: string;
@@ -40,10 +47,9 @@ export default function VoiceInterface({
     {
       id: "welcome-msg",
       role: "assistant",
-      timestamp: "SYSTEM ONLINE",
-      content:
-        "Greetings. Aura Neural Core is initialized and monitoring your wellbeing baseline. Speak naturally about academic pressure, sleep, social dynamics, or anything on your mind. I am listening.",
-      emotions: ["active", "receptive"],
+      timestamp: new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      content: "All systems online and operational, Boss.",
+      emotions: ["active"],
       riskLevel: "NORMAL",
     },
   ]);
@@ -51,6 +57,7 @@ export default function VoiceInterface({
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [continuousMode, setContinuousMode] = useState(true);
   const [textInput, setTextInput] = useState("");
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [userId, setUserId] = useState<string>("");
@@ -65,8 +72,17 @@ export default function VoiceInterface({
     helplines?: any;
   }>({ riskLevel: "NORMAL" });
 
-  const speechRecognitionRef = useRef<{ stop: () => void } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const speechRecognitionRef = useRef<{
+    stop: () => void;
+    getTranscript: () => string;
+    resetTranscript: () => void;
+  } | null>(null);
+
+  const isProcessingRef = useRef(false);
+  isProcessingRef.current = isProcessing;
 
   useEffect(() => {
     const savedUserId = localStorage.getItem("teen_user_id") || "teen-alex-01";
@@ -76,67 +92,22 @@ export default function VoiceInterface({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, currentTranscript]);
-
-  const handleToggleRecord = async () => {
-    if (isRecording) {
-      setIsRecording(false);
-      setIsProcessing(true);
-
-      if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.stop();
-        speechRecognitionRef.current = null;
-      }
-
-      try {
-        const audioBlob = await stopRecording();
-        let spokenText = currentTranscript.trim();
-
-        if (!spokenText && audioBlob.size > 0) {
-          spokenText = await transcribeAudio(audioBlob);
-        }
-
-        if (spokenText) {
-          await processUserMessage(spokenText);
-        } else {
-          setIsProcessing(false);
-        }
-      } catch (err) {
-        console.error("Error finalizing audio:", err);
-        setIsProcessing(false);
-      }
-    } else {
-      stopAudioPlayback();
-      setIsSpeaking(false);
-      setCurrentTranscript("");
-
-      try {
-        await startRecording();
-        setIsRecording(true);
-
-        const recognition = startBrowserSpeechRecognition(
-          (liveText) => {
-            setCurrentTranscript(liveText);
-          },
-          (err) => {
-            console.warn("Speech recognition notice:", err);
-          }
-        );
-        speechRecognitionRef.current = recognition;
-      } catch (err) {
-        console.error("Error starting recording:", err);
-        setIsRecording(false);
-      }
-    }
-  };
+  }, [messages]);
 
   const processUserMessage = async (userText: string) => {
-    if (!userText.trim()) return;
+    if (!userText.trim() || isProcessingRef.current) return;
+
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      speechRecognitionRef.current = null;
+    }
+    setIsRecording(false);
 
     const timeString = new Date().toLocaleTimeString("en-US", {
       hour12: false,
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit"
     });
 
     const userMsgId = `msg-${Date.now()}`;
@@ -156,6 +127,7 @@ export default function VoiceInterface({
       );
 
       setLatestResponse(resp);
+
       if (resp.conversation_id) {
         setConversationId(resp.conversation_id);
       }
@@ -197,14 +169,24 @@ export default function VoiceInterface({
           audioBlob,
           resp.response_text,
           () => setIsSpeaking(true),
-          () => setIsSpeaking(false)
+          () => {
+            setIsSpeaking(false);
+            if (continuousMode) {
+              setTimeout(() => startVoiceListening(), 400);
+            }
+          }
         );
       } catch (audioErr) {
         playSpokenResponse(
           null,
           resp.response_text,
           () => setIsSpeaking(true),
-          () => setIsSpeaking(false)
+          () => {
+            setIsSpeaking(false);
+            if (continuousMode) {
+              setTimeout(() => startVoiceListening(), 400);
+            }
+          }
         );
       }
     } catch (err) {
@@ -216,10 +198,137 @@ export default function VoiceInterface({
           id: `err-${Date.now()}`,
           role: "assistant",
           timestamp: timeString,
-          content:
-            "Acoustic feedback loop glitch detected. Neural Core remains ready for input. Please transmit again.",
+          content: "System error: unable to contact FRIDAY core.",
         },
       ]);
+      if (continuousMode) {
+        setTimeout(() => startVoiceListening(), 1000);
+      }
+    }
+  };
+
+  const handleImageUpload = async (file: File) => {
+    if (!file) return;
+
+    stopAudioPlayback();
+    setIsSpeaking(false);
+    setIsProcessing(true);
+
+    const timeString = new Date().toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+
+    try {
+      const ocrResp: OCRResponse = await analyzeImageDocument(
+        file,
+        userId || "teen-alex-01",
+        conversationId || undefined
+      );
+
+      const userMsg: MessageItem = {
+        id: `ocr-usr-${Date.now()}`,
+        role: "user",
+        content: `Uploaded Document: ${file.name}`,
+        timestamp: timeString,
+        ocrDetails: {
+          filename: file.name,
+          documentType: ocrResp.ocr_result.document_type,
+          extractedText: ocrResp.ocr_result.extracted_text,
+          summary: ocrResp.ocr_result.summary,
+        },
+      };
+
+      const aiMsg: MessageItem = {
+        id: `ocr-ai-${Date.now() + 1}`,
+        role: "assistant",
+        content: ocrResp.ai_companion_reply,
+        timestamp: timeString,
+        riskLevel: ocrResp.risk_assessment?.proposed_level || "NORMAL",
+      };
+
+      setMessages((prev) => [...prev, userMsg, aiMsg]);
+      setIsProcessing(false);
+
+      playSpokenResponse(
+        null,
+        ocrResp.ai_companion_reply,
+        () => setIsSpeaking(true),
+        () => {
+          setIsSpeaking(false);
+          if (continuousMode) setTimeout(() => startVoiceListening(), 400);
+        }
+      );
+    } catch (err) {
+      console.error("OCR Error:", err);
+      setIsProcessing(false);
+    }
+  };
+
+  const startVoiceListening = async () => {
+    stopAudioPlayback();
+    setIsSpeaking(false);
+    setCurrentTranscript("");
+
+    try {
+      await startRecording();
+      setIsRecording(true);
+
+      const recognition = startBrowserSpeechRecognition(
+        (liveText, _isFinal) => {
+          setCurrentTranscript(liveText);
+        },
+        (err) => console.warn("Speech recognition notice:", err),
+        async (finishedTranscript) => {
+          if (finishedTranscript.trim().length > 0 && !isProcessingRef.current) {
+            await finalizeAndSubmit(finishedTranscript);
+          }
+        },
+        1800
+      );
+      speechRecognitionRef.current = recognition;
+    } catch (err) {
+      console.error("Error starting recording:", err);
+      setIsRecording(false);
+    }
+  };
+
+  const finalizeAndSubmit = async (overrideTranscript?: string) => {
+    setIsRecording(false);
+    setIsProcessing(true);
+
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      speechRecognitionRef.current = null;
+    }
+
+    try {
+      const audioBlob = await stopRecording();
+      let spokenText = (overrideTranscript || currentTranscript).trim();
+
+      if (!spokenText && audioBlob.size > 0) {
+        spokenText = await transcribeAudio(audioBlob);
+      }
+
+      if (spokenText) {
+        await processUserMessage(spokenText);
+      } else {
+        setIsProcessing(false);
+        if (continuousMode) setTimeout(() => startVoiceListening(), 500);
+      }
+    } catch (err) {
+      console.error("Error finalizing audio:", err);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleToggleRecord = async () => {
+    if (isRecording) {
+      await finalizeAndSubmit();
+    } else {
+      await startVoiceListening();
     }
   };
 
@@ -231,239 +340,204 @@ export default function VoiceInterface({
     await processUserMessage(txt);
   };
 
-  const quickTelemetryPrompts = [
-    { label: "EXAM_ANXIETY", text: "I have exams coming up and I'm feeling overwhelmed with study pressure." },
-    { label: "SLEEP_DEBT", text: "I've been doomscrolling on my phone until 3 AM and I can't wake up." },
-    { label: "PEER_ISOLATION", text: "I feel left out from my friend group and isolated lately." },
-    { label: "PARENT_PRESSURE", text: "My parents are putting extreme pressure on my academic grades." },
-  ];
-
   return (
-    <div className="flex flex-col h-full space-y-4 font-mono-hud">
-      {/* Safety Protocol Banner (if triggered) */}
-      {latestResponse && latestResponse.risk_level !== "NORMAL" && (
-        <div
-          onClick={() => {
-            setSafetyData({
-              riskLevel: latestResponse.risk_level,
-              guidance: latestResponse.safety_guidance,
-              helplines: latestResponse.helplines,
-            });
-            setIsSafetyModalOpen(true);
-          }}
-          className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all hover:scale-[1.005] ${
-            latestResponse.risk_level === "IMMEDIATE_SAFETY"
-              ? "bg-rose-950/80 border-rose-500 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.3)]"
-              : "bg-amber-950/80 border-amber-500 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-xl animate-pulse">⚠️</span>
-            <div>
-              <div className="text-xs font-bold tracking-widest uppercase">
-                SAFETY PROTOCOL TRIGGERED: [{latestResponse.risk_level}]
-              </div>
-              <div className="text-[11px] opacity-90 font-sans mt-0.5">
-                {latestResponse.safety_guidance?.headline || "Human Connection Guidance Recommended"}
-              </div>
-            </div>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-100px)] font-mono-hud text-[11px] text-cyan-400/80 max-w-7xl mx-auto px-4">
+      
+      {/* Hidden OCR Input */}
+      <input type="file" ref={fileInputRef} accept="image/*,.pdf" className="hidden" onChange={(e) => {
+          if (e.target.files && e.target.files[0]) handleImageUpload(e.target.files[0]);
+      }} />
+
+      {/* LEFT / CENTER PANEL: Hologram Sphere, Status & Controls */}
+      <div className="lg:col-span-5 flex flex-col items-center justify-between border border-cyan-500/30 rounded-2xl bg-[#010e17]/80 p-6 shadow-[0_0_20px_rgba(0,210,255,0.08)] relative">
+        
+        {/* Status Header */}
+        <div className="w-full flex items-center justify-between border-b border-cyan-500/20 pb-3">
+          <div className="flex items-center gap-2 font-bold text-cyan-300 tracking-wider">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#00d2ff]"></span>
+            FRIDAY // VOICE_CORE
           </div>
-          <span className="text-[11px] font-bold px-3 py-1 rounded bg-white/10 border border-white/20">
-            VIEW PROTOCOL →
+          <span className="px-2 py-0.5 border border-cyan-500/40 rounded text-[9px] bg-cyan-950/40 text-cyan-300">
+            {isProcessing ? "PROCESSING" : isSpeaking ? "SPEAKING" : isRecording ? "LISTENING" : "STANDBY"}
           </span>
         </div>
-      )}
 
-      {/* Main Jarvis Voice Sphere Core */}
-      <div className="hud-panel p-6 sm:p-8 flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Radar Scanning Line Background */}
-        <div className="absolute inset-0 pointer-events-none opacity-20 bg-[radial-gradient(circle_at_center,rgba(0,240,255,0.15)_0,transparent_70%)]"></div>
-
-        {/* Status HUD Header */}
-        <div className="w-full flex items-center justify-between text-[11px] text-slate-400 border-b border-cyan-500/20 pb-3 mb-6">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
-            <span className="text-cyan-300 font-bold tracking-wider">
-              {isRecording
-                ? "ACOUSTIC INTAKE: ACTIVE"
-                : isSpeaking
-                ? "SYNTHESIS VOCALIZING..."
-                : isProcessing
-                ? "NEURAL REASONING ENGINE..."
-                : "JARVIS CORE: LISTENING"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 text-[10px]">
-            <span className="text-slate-500">ENGINE:</span>
-            <span className="text-cyan-400 font-bold">GEMINI 1.5</span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-500">STT:</span>
-            <span className="text-cyan-400 font-bold">DEEPGRAM</span>
+        {/* Transmission Status */}
+        <div className="w-full max-w-xs rounded-xl border border-cyan-500/20 bg-[#010e17]/60 p-2.5 text-center my-2">
+          <div className="text-[9px] text-cyan-500/80 mb-0.5 uppercase tracking-widest">CURRENT PROTOCOL</div>
+          <div className="text-xs font-bold text-cyan-100 font-sans tracking-wide">
+            {isProcessing ? "ANALYZING UPLINK..." : 
+             latestResponse?.risk_level === "IMMEDIATE_SAFETY" ? "CRITICAL PROTOCOL ACTIVE" : 
+             latestResponse?.risk_level === "HIGH_CONCERN" ? "SUPPORT ESCALATION ACTIVE" :
+             "ALL SYSTEMS ONLINE"}
           </div>
         </div>
 
-        {/* Central Holographic Arc Reactor Orb */}
-        <div className="relative my-6 flex items-center justify-center">
-          {/* Outer Rotating Counter Rings */}
-          <div className="absolute w-56 h-56 rounded-full border border-dashed border-cyan-400/30 animate-spin-slow pointer-events-none"></div>
-          <div className="absolute w-48 h-48 rounded-full border border-cyan-500/20 border-t-cyan-400 border-b-cyan-400 animate-spin-reverse-slow pointer-events-none"></div>
-
-          {/* Glowing Aura Rings */}
-          {(isRecording || isSpeaking) && (
-            <div className="absolute w-40 h-40 rounded-full bg-cyan-500/20 animate-ping opacity-50"></div>
-          )}
-
-          {/* Central Reactor Orb Button */}
-          <button
-            onClick={handleToggleRecord}
-            disabled={isProcessing}
-            aria-label={isRecording ? "Stop voice recording" : "Start speaking"}
-            className={`relative z-10 w-36 h-36 rounded-full flex flex-col items-center justify-center transition-all duration-500 cursor-pointer shadow-2xl ${
-              isRecording
-                ? "bg-gradient-to-tr from-rose-600 to-rose-900 border-2 border-rose-400 shadow-[0_0_50px_rgba(244,63,94,0.6)] animate-pulse"
-                : isSpeaking
-                ? "bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-800 border-2 border-cyan-300 shadow-[0_0_60px_rgba(0,240,255,0.7)] animate-jarvis-pulse"
-                : isProcessing
-                ? "bg-gradient-to-tr from-amber-600 to-orange-800 border-2 border-amber-400 shadow-[0_0_40px_rgba(245,158,11,0.5)] animate-spin-slow"
-                : "bg-gradient-to-tr from-slate-950 via-cyan-950 to-slate-900 border-2 border-cyan-400/60 shadow-[0_0_35px_rgba(0,240,255,0.4)] hover:shadow-[0_0_50px_rgba(0,240,255,0.7)] hover:border-cyan-300 transform hover:scale-105"
-            }`}
-          >
-            <span className="text-4xl">
-              {isRecording ? "⏹️" : isSpeaking ? "🔊" : isProcessing ? "⚡" : "🎙️"}
-            </span>
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-cyan-200 mt-1">
-              {isRecording
-                ? "TRANSMIT"
-                : isSpeaking
-                ? "OUTPUT"
-                : isProcessing
-                ? "ANALYZING"
-                : "TAP MIC"}
-            </span>
-          </button>
+        {/* FRIDAY Holographic Sphere */}
+        <div 
+          onClick={handleToggleRecord}
+          className={`plasma-sphere-container ${isRecording ? 'plasma-listening' : isSpeaking ? 'plasma-speaking' : ''} my-4 cursor-pointer`}
+          title="Click to speak with FRIDAY"
+        >
+          <div className="hologram-ring-outer"></div>
+          <div className="hologram-ring-inner"></div>
+          <div className="hologram-sphere"></div>
         </div>
 
-        {/* Live Acoustic Waveform Visualizer */}
-        <div className="w-full flex flex-col items-center gap-2 mt-2">
-          <div className="flex items-center gap-1.5 h-10">
-            {[20, 55, 90, 45, 80, 35, 95, 60, 85, 30, 70, 40, 75, 50, 85, 30].map((h, i) => (
-              <div
-                key={i}
-                className={`w-1 rounded-full transition-all duration-200 ${
-                  isRecording
-                    ? "bg-rose-400 shadow-[0_0_8px_#f43f5e]"
-                    : isSpeaking
-                    ? "bg-cyan-400 shadow-[0_0_8px_#00f0ff] wave-bar-hud"
-                    : "bg-cyan-950 h-1.5 border border-cyan-800/40"
-                }`}
-                style={{
-                  height: isRecording || isSpeaking ? `${(h * 0.38) + 6}px` : "5px",
-                  animationDelay: `${i * 0.06}s`,
-                }}
-              ></div>
-            ))}
+        {/* Controls & Voice Action Button */}
+        <div className="flex flex-col items-center gap-3 w-full">
+          <div className="flex items-center gap-4">
+            {/* OCR Document Upload Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-10 h-10 rounded-full flex items-center justify-center border border-cyan-500/30 text-cyan-400 hover:border-cyan-300 hover:bg-cyan-950/40 transition-all"
+              title="Upload Notes or Document for OCR Analysis"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </button>
+
+            {/* Mic Toggle Button */}
+            <button 
+              onClick={handleToggleRecord}
+              className={`w-14 h-14 rounded-full flex items-center justify-center border transition-all ${
+                isRecording 
+                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_25px_rgba(0,210,255,0.6)] animate-pulse' 
+                  : 'bg-transparent border-cyan-500/30 text-cyan-500 hover:border-cyan-400 hover:text-cyan-400 hover:shadow-[0_0_15px_rgba(0,210,255,0.3)]'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="spinner spinner-sm border-cyan-400 border-t-transparent" />
+              ) : (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+
+            {/* Continuous Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setContinuousMode(!continuousMode)}
+              className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all text-[9px] font-bold ${
+                continuousMode 
+                  ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300' 
+                  : 'border-cyan-500/20 text-cyan-600 hover:text-cyan-400'
+              }`}
+              title={continuousMode ? "Continuous voice stream active" : "Push-to-talk mode"}
+            >
+              {continuousMode ? "AUTO" : "MAN"}
+            </button>
+          </div>
+          
+          <div className="px-4 py-1.5 rounded-full border border-cyan-500/30 bg-cyan-950/40 text-cyan-300 font-bold tracking-widest text-[10px] shadow-[0_0_10px_rgba(0,210,255,0.1)] flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-600'}`}></span>
+            {isRecording ? "TRANSCRIBING AUDIO..." : 'CLICK SPHERE OR MIC TO TALK'}
           </div>
 
-          {currentTranscript && (
-            <div className="px-3 py-1 rounded-lg bg-cyan-950/80 border border-cyan-400/40 text-xs text-cyan-200 text-center max-w-md line-clamp-2">
-              &gt; LIVE INTAKE: "{currentTranscript}"
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Terminal Conversation Stream */}
-      <div className="hud-panel p-4 sm:p-5 flex-1 flex flex-col justify-between min-h-[300px]">
-        <div className="space-y-3.5 max-h-[260px] overflow-y-auto pr-1">
-          {messages.map((msg) => {
-            const isAssistant = msg.role === "assistant";
-
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${isAssistant ? "items-start" : "items-end"}`}
-              >
-                <div
-                  className={`max-w-[90%] sm:max-w-[85%] rounded-xl p-3.5 text-xs font-sans leading-relaxed ${
-                    isAssistant
-                      ? "bg-slate-950/90 border border-cyan-500/30 text-slate-200 rounded-tl-none shadow-[0_0_15px_rgba(0,240,255,0.08)]"
-                      : "bg-cyan-950/90 border border-cyan-400/60 text-cyan-100 rounded-tr-none shadow-[0_0_15px_rgba(0,240,255,0.15)]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 font-mono-hud text-[10px] text-cyan-400/80 mb-1 border-b border-white/5 pb-1">
-                    <span>{isAssistant ? "⚡ AURA // CORE" : "👤 TEENAGER"}</span>
-                    <span>{msg.timestamp}</span>
-                  </div>
-
-                  <p>{msg.content}</p>
-
-                  {/* Micro-Intervention Suggestion */}
-                  {msg.intervention && (
-                    <div className="mt-2.5 p-2.5 rounded-lg bg-cyan-950/60 border border-cyan-400/30 font-mono-hud text-[11px] text-cyan-300">
-                      <div className="font-bold flex items-center gap-1.5 mb-0.5">
-                        <span>🛡️ PROTOCOL:</span>
-                        <span>{msg.intervention.title}</span>
-                      </div>
-                      <p className="font-sans text-slate-300 text-xs">{msg.intervention.content}</p>
-                    </div>
-                  )}
-
-                  {/* Detected Tone Signals */}
-                  {isAssistant && msg.emotions && msg.emotions.length > 0 && (
-                    <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center gap-1.5 font-mono-hud text-[10px] text-slate-400">
-                      <span>TONE_SIGNALS:</span>
-                      {msg.emotions.map((e) => (
-                        <span key={e} className="px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                          {e}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Command Injection Prompts & Input Bar */}
-        <div className="pt-3 border-t border-cyan-500/20 space-y-2 mt-2">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-[10px]">
-            <span className="text-slate-500 font-bold shrink-0">[PRESETS]:</span>
-            {quickTelemetryPrompts.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => processUserMessage(item.text)}
-                disabled={isProcessing}
-                className="shrink-0 px-2 py-0.5 rounded bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/30 hover:border-cyan-400 transition-all cursor-pointer font-mono-hud"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={handleTextSubmit} className="flex items-center gap-2">
+          {/* Text Command Input Bar */}
+          <form onSubmit={handleTextSubmit} className="w-full flex items-center gap-2 mt-2">
             <input
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder="&gt; Transmit neural message or query..."
+              placeholder="Type message or command..."
               disabled={isProcessing}
-              className="flex-1 px-3.5 py-2.5 rounded-lg bg-slate-950 border border-cyan-500/30 focus:border-cyan-400 focus:outline-none text-xs text-white placeholder:text-slate-600 font-mono-hud transition-colors"
+              className="flex-1 bg-cyan-950/30 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-cyan-100 text-xs font-sans placeholder-cyan-600/60 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all"
             />
             <button
               type="submit"
-              disabled={!textInput.trim() || isProcessing}
-              className="px-4 py-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-400/60 text-cyan-300 hover:text-white font-bold text-xs transition-all shadow-[0_0_15px_rgba(0,240,255,0.2)] cursor-pointer"
+              disabled={isProcessing || !textInput.trim()}
+              className="px-3.5 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 disabled:opacity-30 disabled:hover:bg-cyan-500/20 text-cyan-300 rounded-xl font-bold transition-all text-xs"
             >
-              TRANSMIT ↵
+              SEND
             </button>
           </form>
         </div>
       </div>
 
-      {/* Safety Modal */}
+      {/* RIGHT PANEL: Terminal Feed & Chat Stream */}
+      <div className="lg:col-span-7 border border-cyan-500/30 rounded-2xl bg-[#010e17]/80 flex flex-col shadow-[0_0_20px_rgba(0,210,255,0.08)] overflow-hidden">
+        
+        {/* Terminal Header */}
+        <div className="flex items-center justify-between p-3.5 border-b border-cyan-500/30 bg-cyan-950/20">
+          <div className="flex items-center gap-2 font-bold text-cyan-300">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#00d2ff] animate-pulse"></span>
+            FRIDAY // TERMINAL_FEED
+          </div>
+          <span className="text-cyan-500 text-[9px] tracking-widest">LIVE_LOGS</span>
+        </div>
+
+        {/* Message Stream */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+          {messages.map((msg) => {
+            const isAI = msg.role === "assistant";
+            return (
+              <div key={msg.id} className={`border rounded-xl p-3.5 ${isAI ? 'border-cyan-500/30 bg-cyan-950/20' : 'border-slate-700/50 bg-slate-900/30'}`}>
+                <div className="flex justify-between items-center text-[9px] font-bold mb-1.5 text-cyan-500 tracking-widest">
+                  <span className="flex items-center gap-1.5">
+                    {isAI ? <span className="text-cyan-300 font-bold">✦ FRIDAY_AI</span> : <span className="text-slate-400">&gt; USER_COMMAND</span>}
+                  </span>
+                  <span className="text-cyan-600/70">{msg.timestamp}</span>
+                </div>
+                <div className={`font-sans text-xs ${isAI ? 'text-cyan-100' : 'text-slate-200'} leading-relaxed`}>
+                  {msg.content}
+                </div>
+                
+                {msg.ocrDetails && (
+                  <div className="mt-2.5 p-2.5 border border-cyan-500/30 bg-cyan-950/40 rounded-lg">
+                    <div className="text-cyan-300 text-[10px] font-bold mb-1">DOCUMENT OCR: {msg.ocrDetails.documentType.toUpperCase()}</div>
+                    <div className="font-sans text-cyan-200/70 italic line-clamp-3">"{msg.ocrDetails.extractedText}"</div>
+                  </div>
+                )}
+                
+                {msg.intervention && (
+                  <div className={`mt-2.5 p-2.5 rounded-lg border ${
+                    msg.riskLevel === "IMMEDIATE_SAFETY" || msg.riskLevel === "HIGH_CONCERN"
+                      ? "border-rose-500/40 bg-rose-950/40 text-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.15)]"
+                      : "border-cyan-500/30 bg-cyan-950/30 text-cyan-200 shadow-[0_0_10px_rgba(0,210,255,0.05)]"
+                  }`}>
+                    <div className="text-[10px] font-bold mb-1 flex items-center gap-1.5">
+                      {msg.riskLevel === "IMMEDIATE_SAFETY" || msg.riskLevel === "HIGH_CONCERN" ? (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping"></span>
+                          <span className="text-rose-400">CRITICAL SAFETY PROTOCOL:</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-cyan-400">💡 SUGGESTION:</span>
+                        </>
+                      )}
+                      <span>{msg.intervention.title}</span>
+                    </div>
+                    <div className="font-sans leading-tight text-xs opacity-90">{msg.intervention.content}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {currentTranscript && (
+            <div className="border border-cyan-500/20 rounded-xl p-3 bg-cyan-950/20 opacity-80 animate-pulse">
+              <div className="flex justify-between items-center text-[9px] font-bold mb-1 text-cyan-400 tracking-widest">
+                <span>&gt; LIVE_TRANSCRIPT</span>
+              </div>
+              <div className="font-sans text-xs text-cyan-200 leading-relaxed italic">
+                "{currentTranscript}"
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef}></div>
+        </div>
+
+        {/* Terminal Footer */}
+        <div className="p-2.5 border-t border-cyan-500/30 text-center text-[9px] text-cyan-600/60 tracking-[0.3em] bg-[#010e17]">
+          --- ENCRYPTED TRANSMISSION STREAM ---
+        </div>
+      </div>
+      
+      {/* Safety Protocol Modal */}
       <SafetyModal
         isOpen={isSafetyModalOpen}
         onClose={() => setIsSafetyModalOpen(false)}
@@ -474,3 +548,4 @@ export default function VoiceInterface({
     </div>
   );
 }
+

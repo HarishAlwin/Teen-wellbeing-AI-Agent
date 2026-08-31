@@ -59,6 +59,32 @@ class PatternDetector:
                 "source": "rule_based",
             })
 
+        # GoEmotions-Driven Pattern: Chronic Nervousness & Perfectionism Strain
+        if "nervousness" in emotions or "fear" in emotions:
+            if academic_stress or current_scores.get("academic", 70) < 60:
+                patterns.append({
+                    "title": "Exam Anticipation & Nervous Overload",
+                    "description": "Fine-grained emotional signals detect persistent nervousness and performance worry tied to upcoming academic milestones.",
+                    "category": "cross_dimensional",
+                    "severity": "high" if "fear" in emotions else "medium",
+                    "dimensions_involved": ["academic", "lifestyle"],
+                    "evidence_snippets": ["GoEmotions flagged acute nervousness", "Academic pressure detected"],
+                    "source": "roberta_nlp",
+                })
+
+        # GoEmotions-Driven Pattern: Disappointment & Self-Isolation Loop
+        if "disappointment" in emotions or "grief" in emotions or "sadness" in emotions:
+            if social_withdrawal or current_scores.get("social", 70) < 60:
+                patterns.append({
+                    "title": "Disappointment & Interpersonal Disconnection",
+                    "description": "Feelings of disappointment or sadness correlate with withdrawing from peer groups and social support networks.",
+                    "category": "cross_dimensional",
+                    "severity": "medium",
+                    "dimensions_involved": ["social", "family"],
+                    "evidence_snippets": ["GoEmotions identified sadness/disappointment", "Social interaction scores lower than baseline"],
+                    "source": "roberta_nlp",
+                })
+
         # 2. Family Pressure & Academic Anxiety Link
         family_conflict = current_scores.get("family", 70) < 55 or any("negative" in s for s in signals.get("family", []))
         if family_conflict and academic_stress:

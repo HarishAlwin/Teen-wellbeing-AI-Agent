@@ -25,15 +25,15 @@ export default function InterventionList({ interventions }: InterventionListProp
   const getTypeIcon = (type: string) => {
     switch (type) {
       case "routine_suggestion":
-        return "🌙";
+        return "RTN";
       case "coping_strategy":
-        return "🧘";
+        return "COP";
       case "trusted_human_referral":
-        return "🤝";
+        return "REF";
       case "emergency_helpline":
-        return "🚨";
+        return "SOS";
       default:
-        return "🌱";
+        return "TIP";
     }
   };
 
@@ -42,7 +42,6 @@ export default function InterventionList({ interventions }: InterventionListProp
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">🌱</span>
             <h3 className="font-bold text-white text-base">Personal Guidance History</h3>
           </div>
           <p className="text-xs text-slate-400">
@@ -57,7 +56,7 @@ export default function InterventionList({ interventions }: InterventionListProp
             key={item.id}
             className="p-4 rounded-xl bg-slate-950/70 border border-white/5 hover:border-white/15 transition-all flex items-start gap-3.5"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-lg shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold font-mono-hud text-cyan-400 shrink-0">
               {getTypeIcon(item.type)}
             </div>
             <div className="flex-1">
