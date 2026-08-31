@@ -88,6 +88,12 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = None
 
 
+@router.get("")
+@router.head("")
+def chat_health_check():
+    return {"status": "ok", "service": "chat"}
+
+
 @router.post("")
 async def send_message(
     req: ChatRequest,

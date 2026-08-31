@@ -75,7 +75,7 @@ app.include_router(alerts.router)         # /api/alerts — requires counselor r
 app.include_router(ocr.router)
 app.include_router(contacts_router.router)  # /api/contacts — requires auth
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {
         "system": "Teen Wellbeing Intelligence — Voice-First AI",
@@ -86,7 +86,9 @@ def read_root():
         "responsible_ai_notice": "This system provides preventive wellbeing companionship and pattern detection, not clinical diagnosis."
     }
 
-@app.get("/api/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "healthy"}
+
 
