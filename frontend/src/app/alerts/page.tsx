@@ -1,56 +1,41 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getAuthHeaders } from "@/lib/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
-
-interface Alert {
-  id: string;
-  user_id: string;
-  conversation_id: string | null;
-  risk_level: "HIGH_CONCERN" | "IMMEDIATE_SAFETY";
-  reason: string;
-  triggered_at: string;
-  notified_channel: string;
-  status: "pending" | "notified" | "acknowledged" | "resolved";
-}
-
-interface AlertsResponse {
-  total: number;
-  offset: number;
-  limit: number;
-  alerts: Alert[];
-}
+import { getAlerts, acknowledgeAlert, AlertItem } from "@/lib/api";
 
 function getRiskColor(level: string) {
   if (level === "IMMEDIATE_SAFETY") return "#ff2d55";
   if (level === "HIGH_CONCERN") return "#ff9500";
+  if (level === "CONCERNING") return "#ffd60a";
   return "#00d4ff";
 }
 
 function getStatusColor(status: string) {
-  if (status === "resolved") return "#34c759";
-  if (status === "acknowledged") return "#00d4ff";
-  if (status === "notified") return "#ff9500";
-  return "#ff2d55"; // pending
+  if (status === "acknowledged" || status === "resolved") return "#34c759";
+  if (status === "notified") return "#00d4ff";
+  if (status === "failed") return "#ff2d55";
+  return "#ff9500"; // triggered / pending
 }
 
 function formatTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  if (!iso) return "Unknown";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return iso;
+  }
 }
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [total, setTotal] = useState(0);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
@@ -65,54 +50,46 @@ export default function AlertsPage() {
   const fetchAlerts = useCallback(async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams({ limit: "50", offset: "0" });
-      if (filter !== "all") params.set("risk_level", filter);
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`, { headers });
-      if (res.status === 403) {
-        throw new Error("Access restricted: Counselor role required. Please log in with a counselor account.");
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: AlertsResponse = await res.json();
-      setAlerts(data.alerts);
-      setTotal(data.total);
+      const data = await getAlerts();
+      setAlerts(data.alerts || []);
       setError(null);
     } catch (e: unknown) {
       setError(`Failed to load alerts: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000); // auto-refresh every 30s
+    const interval = setInterval(fetchAlerts, 15000); // auto-refresh every 15s
     return () => clearInterval(interval);
   }, [fetchAlerts]);
 
-  const updateStatus = async (alertId: string, newStatus: string) => {
+  const handleAcknowledge = async (alertId: string) => {
     setUpdatingId(alertId);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(
-        `${API_BASE}/alerts/${alertId}/status?new_status=${newStatus}`,
-        { method: "PATCH", headers }
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await acknowledgeAlert(alertId);
       await fetchAlerts();
     } catch (e: unknown) {
-      console.error("Status update failed:", e);
+      console.error("Acknowledge failed:", e);
     } finally {
       setUpdatingId(null);
     }
   };
 
-  const pendingCount = alerts.filter((a) => a.status === "pending").length;
+  const filteredAlerts = alerts.filter((a) => {
+    if (filter === "all") return true;
+    return a.risk_level === filter;
+  });
+
+  const pendingCount = alerts.filter((a) => a.status === "triggered" || a.status === "notified").length;
   const immediateCount = alerts.filter((a) => a.risk_level === "IMMEDIATE_SAFETY").length;
+  const calleCallsCount = alerts.filter((a) => a.calle_call_id || a.notified_channel === "calle").length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#000d1a", color: "#e0f4ff", fontFamily: "'Inter', monospace" }}>
-      {/* ── HUD Top Bar ── */}
+    <div style={{ minHeight: "100vh", background: "#000d1a", color: "#e0f4ff", fontFamily: "'Inter', sans-serif" }}>
+      {/* ── Top Bar ── */}
       <div style={{
         borderBottom: "1px solid rgba(0,212,255,0.2)",
         background: "rgba(0,10,25,0.95)",
@@ -133,10 +110,10 @@ export default function AlertsPage() {
             animation: pendingCount > 0 ? "pulse 1s infinite" : "none",
           }} />
           <span style={{ color: "#00d4ff", fontWeight: 700, letterSpacing: 2, fontSize: 13 }}>
-            COUNSELOR ALERT DASHBOARD
+            AURA COUNSELOR & SAFETY ALERTS
           </span>
           <span style={{ color: "#4a9eff", fontSize: 11, opacity: 0.7 }}>
-            // RESTRICTED ACCESS — NOT FOR TEEN USERS
+            // AUDIT & ESCALATION LOGS
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 24, fontSize: 11, color: "#4a9eff" }}>
@@ -169,10 +146,10 @@ export default function AlertsPage() {
         {/* ── Stats Row ── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
           {[
-            { label: "TOTAL ALERTS", value: total, color: "#00d4ff" },
-            { label: "IMMEDIATE SAFETY", value: alerts.filter(a => a.risk_level === "IMMEDIATE_SAFETY").length, color: "#ff2d55" },
+            { label: "TOTAL ESCALATIONS", value: alerts.length, color: "#00d4ff" },
+            { label: "IMMEDIATE SAFETY", value: immediateCount, color: "#ff2d55" },
             { label: "HIGH CONCERN", value: alerts.filter(a => a.risk_level === "HIGH_CONCERN").length, color: "#ff9500" },
-            { label: "PENDING REVIEW", value: pendingCount, color: "#ff2d55" },
+            { label: "CALL-E ESCALATIONS", value: calleCallsCount, color: "#a855f7" },
           ].map((stat) => (
             <div key={stat.label} style={{
               background: "rgba(0,20,45,0.8)",
@@ -220,7 +197,7 @@ export default function AlertsPage() {
         </div>
 
         {/* ── Alert List ── */}
-        {loading ? (
+        {loading && alerts.length === 0 ? (
           <div style={{ textAlign: "center", padding: 64, color: "#4a9eff", fontSize: 13 }}>
             LOADING ALERTS...
           </div>
@@ -235,7 +212,7 @@ export default function AlertsPage() {
           }}>
             {error}
           </div>
-        ) : alerts.length === 0 ? (
+        ) : filteredAlerts.length === 0 ? (
           <div style={{
             textAlign: "center",
             padding: 64,
@@ -246,23 +223,23 @@ export default function AlertsPage() {
             ✓ NO ALERTS — ALL CLEAR
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {alerts.map((alert) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {filteredAlerts.map((alert) => (
               <div
                 key={alert.id}
                 style={{
                   background: "rgba(0,20,45,0.8)",
                   border: `1px solid ${getRiskColor(alert.risk_level)}33`,
-                  borderLeft: `3px solid ${getRiskColor(alert.risk_level)}`,
+                  borderLeft: `4px solid ${getRiskColor(alert.risk_level)}`,
                   borderRadius: 8,
                   padding: "20px 24px",
                   transition: "all 0.2s",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-                  {/* Left: info */}
+                  {/* Left info */}
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                       <span style={{
                         background: `${getRiskColor(alert.risk_level)}22`,
                         border: `1px solid ${getRiskColor(alert.risk_level)}55`,
@@ -286,35 +263,81 @@ export default function AlertsPage() {
                       }}>
                         {alert.status.toUpperCase()}
                       </span>
-                      <span style={{ fontSize: 11, color: "#4a9eff", opacity: 0.7 }}>
-                        via {alert.notified_channel}
+                      <span style={{
+                        background: alert.notified_channel === "calle" ? "rgba(168,85,247,0.2)" : "rgba(74,158,255,0.1)",
+                        border: alert.notified_channel === "calle" ? "1px solid rgba(168,85,247,0.4)" : "1px solid rgba(74,158,255,0.2)",
+                        color: alert.notified_channel === "calle" ? "#c084fc" : "#4a9eff",
+                        padding: "3px 10px",
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}>
+                        {alert.notified_channel === "calle" ? "📞 CALL-E AI Call" : `via ${alert.notified_channel}`}
                       </span>
                     </div>
 
                     <p style={{
-                      margin: "0 0 10px",
+                      margin: "0 0 12px",
                       fontSize: 13,
                       color: "#c8e6ff",
                       lineHeight: 1.6,
-                      maxWidth: 640,
+                      maxWidth: 700,
                     }}>
-                      {alert.reason}
+                      {alert.reasons}
                     </p>
 
-                    <div style={{ fontSize: 11, color: "#4a9eff", display: "flex", gap: 20 }}>
+                    {/* CALL-E Structured Result Box */}
+                    {alert.calle_structured_result && (
+                      <div style={{
+                        background: "rgba(168,85,247,0.08)",
+                        border: "1px solid rgba(168,85,247,0.3)",
+                        borderRadius: 6,
+                        padding: "12px 16px",
+                        marginBottom: 12,
+                        fontSize: 12,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, color: "#c084fc", fontWeight: 700 }}>
+                          <span>🎙️ CALL-E Agent Structured Briefing</span>
+                          {alert.calle_task_completed && (
+                            <span style={{ background: "rgba(52,199,89,0.2)", color: "#34c759", padding: "2px 6px", borderRadius: 4, fontSize: 10 }}>
+                              ✓ Task Completed
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 16px", color: "#e0f4ff" }}>
+                          <span style={{ color: "#a855f7" }}>Counselor Reached:</span>
+                          <span style={{ fontWeight: 600 }}>{alert.calle_structured_result.counselor_reached || "unknown"}</span>
+                          <span style={{ color: "#a855f7" }}>Acknowledged:</span>
+                          <span style={{ fontWeight: 600 }}>{alert.calle_structured_result.acknowledged || "unknown"}</span>
+                          <span style={{ color: "#a855f7" }}>Recommended Next Step:</span>
+                          <span style={{ color: "#38bdf8", fontWeight: 700 }}>{alert.calle_structured_result.recommended_next_step || "unknown"}</span>
+                          {alert.calle_structured_result.notes && (
+                            <>
+                              <span style={{ color: "#a855f7" }}>Notes:</span>
+                              <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>{alert.calle_structured_result.notes}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ fontSize: 11, color: "#4a9eff", display: "flex", gap: 20, flexWrap: "wrap" }}>
                       <span>⏱ {formatTime(alert.triggered_at)}</span>
-                      <span style={{ opacity: 0.5 }}>USER {alert.user_id.slice(0, 8).toUpperCase()}</span>
-                      {alert.conversation_id && (
-                        <span style={{ opacity: 0.5 }}>CONV {alert.conversation_id.slice(0, 8).toUpperCase()}</span>
+                      <span style={{ opacity: 0.6 }}>USER: {alert.user_display_name || alert.user_id.slice(0, 8)}</span>
+                      {alert.calle_call_id && (
+                        <span style={{ color: "#c084fc" }}>CALL ID: {alert.calle_call_id}</span>
+                      )}
+                      {alert.delivery_error && (
+                        <span style={{ color: "#ff2d55" }}>⚠️ {alert.delivery_error}</span>
                       )}
                     </div>
                   </div>
 
                   {/* Right: action buttons */}
-                  {(alert.status === "pending" || alert.status === "notified") && (
+                  {alert.status !== "acknowledged" && alert.status !== "resolved" ? (
                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                       <button
-                        onClick={() => updateStatus(alert.id, "acknowledged")}
+                        onClick={() => handleAcknowledge(alert.id)}
                         disabled={updatingId === alert.id}
                         style={{
                           background: "rgba(0,212,255,0.1)",
@@ -330,45 +353,9 @@ export default function AlertsPage() {
                       >
                         ACKNOWLEDGE
                       </button>
-                      <button
-                        onClick={() => updateStatus(alert.id, "resolved")}
-                        disabled={updatingId === alert.id}
-                        style={{
-                          background: "rgba(52,199,89,0.1)",
-                          border: "1px solid rgba(52,199,89,0.3)",
-                          color: "#34c759",
-                          padding: "8px 16px",
-                          borderRadius: 4,
-                          cursor: "pointer",
-                          fontSize: 11,
-                          letterSpacing: 1,
-                          opacity: updatingId === alert.id ? 0.5 : 1,
-                        }}
-                      >
-                        RESOLVE
-                      </button>
                     </div>
-                  )}
-                  {alert.status === "resolved" && (
-                    <span style={{ color: "#34c759", fontSize: 11, letterSpacing: 1 }}>✓ RESOLVED</span>
-                  )}
-                  {alert.status === "acknowledged" && (
-                    <button
-                      onClick={() => updateStatus(alert.id, "resolved")}
-                      disabled={updatingId === alert.id}
-                      style={{
-                        background: "rgba(52,199,89,0.1)",
-                        border: "1px solid rgba(52,199,89,0.3)",
-                        color: "#34c759",
-                        padding: "8px 16px",
-                        borderRadius: 4,
-                        cursor: "pointer",
-                        fontSize: 11,
-                        letterSpacing: 1,
-                      }}
-                    >
-                      MARK RESOLVED
-                    </button>
+                  ) : (
+                    <span style={{ color: "#34c759", fontSize: 11, letterSpacing: 1 }}>✓ ACKNOWLEDGED</span>
                   )}
                 </div>
               </div>
@@ -386,3 +373,4 @@ export default function AlertsPage() {
     </div>
   );
 }
+

@@ -204,3 +204,56 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   }
   return res.json();
 }
+
+export interface AlertItem {
+  id: string;
+  user_id: string;
+  user_display_name?: string;
+  conversation_id: string | null;
+  risk_level: "NORMAL" | "CONCERNING" | "HIGH_CONCERN" | "IMMEDIATE_SAFETY";
+  reasons: string;
+  notified_channel: string;
+  call_sid?: string | null;
+  sms_sid?: string | null;
+  calle_call_id?: string | null;
+  calle_task_completed?: boolean | null;
+  calle_structured_result?: {
+    counselor_reached?: string;
+    acknowledged?: string;
+    recommended_next_step?: string;
+    notes?: string;
+  } | null;
+  status: string;
+  delivery_error?: string | null;
+  triggered_at: string;
+  acknowledged_at?: string | null;
+}
+
+export interface AlertsResponse {
+  alerts: AlertItem[];
+  count: number;
+}
+
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  return { "Content-Type": "application/json" };
+}
+
+export async function getAlerts(): Promise<AlertsResponse> {
+  const res = await fetch(`${API_BASE}/alerts`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch alerts (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function acknowledgeAlert(alertId: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/alerts/${alertId}/acknowledge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to acknowledge alert (${res.status})`);
+  }
+  return res.json();
+}
+
