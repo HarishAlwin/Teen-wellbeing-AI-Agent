@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,10 +22,19 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/teen_wellbeing
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-ksryVoNAGZT8GxWCTiVm}
+      - CALLE_API_KEY=${CALLE_API_KEY:-}
+      - CALLE_BASE_URL=${CALLE_BASE_URL:-https://api.heycall-e.com}
+      - CALLE_RECIPIENT_REGION=${CALLE_RECIPIENT_REGION:-IN}
+      - CALLE_RECIPIENT_LOCALE=${CALLE_RECIPIENT_LOCALE:-en-IN}
+      - HELPLINE_ALERT_NUMBER=${HELPLINE_ALERT_NUMBER:-}
+      - ESCALATION_ENABLED=${ESCALATION_ENABLED:-false}
+      - CORS_ORIGINS=http://localhost:3000
     depends_on:
       - postgres
 
@@ -42,4 +53,3 @@ services:
 
 volumes:
   pgdata:
-

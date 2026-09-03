@@ -1,24 +1,7 @@
-"""
-backend/services/llm_agent.py
-─────────────────────────────
-Core AI agent powered by Groq API (llama-3.3-70b-versatile).
-
-Architecture notes:
-- The LLM is the PRIMARY signal for risk assessment and pattern observation.
-- The deterministic RiskClassifier (risk_classifier.py) acts as a MANDATORY SAFETY FLOOR:
-  it can escalate the LLM's proposed risk level upward but NEVER downgrade it.
-- Uses Groq for ultra-low-latency (<250ms), human-like, empathetic reasoning.
-- Tool-use (function calling) is implemented for agentic behaviour; see _run_with_tools().
-- Graceful deterministic fallback is preserved for offline or when GROQ_API_KEY is absent.
-"""
-
 import os
 import json
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-
-logger = logging.getLogger("llm_agent")
+from typing import Dict, Any, List, Optional, Tuple
 
 try:
     from dotenv import load_dotenv
@@ -26,153 +9,201 @@ try:
 except ImportError:
     pass
 
-# Groq Client Initialization
-GROQ_MODEL = os.getenv("GROQ_MODEL", "groq/compound")
-FALLBACK_MODELS = ["groq/compound", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound-mini"]
-
-groq_client = None
-llm_available = False
+logger = logging.getLogger("aura.llm_agent")
 
 try:
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-    if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here":
-        from groq import Groq
-        groq_client = Groq(api_key=GROQ_API_KEY)
+    import google.generativeai as genai
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+        genai.configure(api_key=GEMINI_API_KEY)
         llm_available = True
-        logger.info(f"[LLMAgent] Groq client initialized with model: {GROQ_MODEL}")
     else:
-        logger.warning("[LLMAgent] GROQ_API_KEY not set. Using deterministic fallback.")
-except Exception as e:
-    logger.error(f"[LLMAgent] Could not initialize Groq client: {e}", exc_info=True)
-    groq_client = None
+        llm_available = False
+except ImportError:
+    genai = None
     llm_available = False
 
+VALID_RISK_LEVELS = {"NORMAL", "CONCERNING", "HIGH_CONCERN", "IMMEDIATE_SAFETY"}
 
-
-# ── System Prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """
-You are Jarvis / Aura — a warm, empathetic, and relatable AI Teen Wellbeing Companion.
+You are a warm, empathetic, and attentive AI Teen Wellbeing Companion.
+Your role is to listen naturally, understand emotional and behavioral context across 5 core life dimensions:
+1. Social (friends, peer dynamics, feeling included/isolated)
+2. Family (home communication, parental expectations, family atmosphere)
+3. Academic (study workload, exam anxiety, school pressure)
+4. Digital (screen habits, late-night phone use, social media comparison)
+5. Lifestyle (sleep, energy, fatigue, meals, exercise)
 
-You support teenagers across 5 core life dimensions:
-1. Social    — friends, relationships, peer dynamics, inclusion, social anxiety
-2. Family    — home atmosphere, parental expectations, family communication
-3. Academic  — workload, exam anxiety, school pressure, future plans
-4. Digital   — screen habits, late-night phone use, social media fatigue
-5. Lifestyle — sleep quality, energy, fatigue, nutrition, physical activity
+CRITICAL GUIDELINES & RESPONSIBLE AI RULES:
+- Talk like a supportive, relatable mentor or caring listener — never robotic, condescending, or clinical.
+- Ask 1 gentle, natural follow-up question to help the teenager explore what they are experiencing.
+- NEVER DIAGNOSE mental health disorders (e.g. do not say "You have depression/clinical anxiety"). Frame insights as patterns or understandable reactions to life stressors.
+- Treat cross-dimensional links naturally (e.g. "When exams get stressful, staying up late scrolling is super tempting, but it can make you feel extra drained the next day.").
+- If risk is CONCERNING or HIGH_CONCERN, warmly encourage talking to a trusted adult, parent, school counselor, or confidential helpline.
+- If risk is IMMEDIATE_SAFETY, prioritize safety with calm, loving urgency and direct them to human help immediately.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL CONVERSATIONAL & SAFETY RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Act like a real, caring friend/mentor. Speak naturally, warmly, and concisely (2-3 sentences).
-- Match the user's topic directly. If they talk about a breakup, school, or food, engage with that topic!
-- NEVER diagnose disorders (no clinical jargon like "you have clinical depression").
-- DO NOT panic or push crisis hotlines for routine vents (e.g., breakups, exam stress, feeling sad, casual chat). 
-- For IMMEDIATE_SAFETY (explicit suicidal ideation, self-harm, or severe danger): An automated emergency dispatch call and SMS is automatically placed by the system to their emergency guardian contact sharing their situation. Acknowledge this with calm reassurance (e.g. "I'm right here with you. I've automatically alerted your designated emergency guardian so you don't have to carry this alone..."), keep them grounded, and stay present.
-- For NORMAL and CONCERNING messages: listen attentively, validate their emotions, and ask 1 natural, gentle question. Do NOT mention emergency contacts or helplines.
-- "intervention.needed" should be FALSE for most regular messages. Only set "needed": true if providing a concrete, gentle wellness micro-habit (like a 2-minute stretch or study break).
+You are also responsible for genuinely REASONING about risk and behavioral patterns yourself —
+not just writing a reply — based on the full conversation, not only the latest message.
+A rule-based safety system also runs independently as a hard safety floor and can never be
+downgraded by you, but your own assessment is the PRIMARY signal for anything that system's
+fixed keyword rules wouldn't catch (subtler distress, indirect language, patterns building
+across several messages).
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RISK ASSESSMENT:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- NORMAL          — Routine chat, casual vents, standard teenage challenges (breakups, tests, tiredness).
-- CONCERNING      — Persistent overwhelm, deep stress, or recurring sadness across multiple messages.
-- HIGH_CONCERN    — Explicit hopelessness, severe crisis, or indications of unsafe home abuse/danger.
-- IMMEDIATE_SAFETY — Direct suicidal statements, active self-harm, or immediate physical emergency.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT FORMAT (strict valid JSON only):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Return your response in STRICT JSON format:
 {
-  "response_text": "Empathetic, natural conversational reply engaging directly with what they shared (2-3 sentences).",
-  "emotions_detected": ["sadness"],
+  "response_text": "Empathetic conversational response for speech (2-4 sentences, spoken tone).",
+  "emotions_detected": ["anxious", "overwhelmed"],
   "dimension_impacts": {
-    "social": -2.0,
+    "social": 0.0,
     "family": 0.0,
-    "academic": 0.0,
-    "digital": 0.0,
-    "lifestyle": 0.0
+    "academic": -5.0,
+    "digital": -4.0,
+    "lifestyle": -6.0
   },
   "intervention": {
-    "needed": false,
-    "type": "reflective_question",
-    "title": "Emotional Reflection",
-    "content": "Take a moment to acknowledge your feelings."
+    "needed": true,
+    "type": "routine_suggestion",
+    "title": "Wind-down Buffer",
+    "content": "Try leaving the phone across the room 20 minutes before sleeping."
   },
+  "suggested_risk_level": "NORMAL",
   "risk_assessment": {
-    "proposed_level": "NORMAL",
-    "reasoning": "User is discussing a breakup. Normal emotional reaction to relationship stress with no safety signals."
+    "level": "NORMAL",
+    "reasoning": "One or two sentences on WHY you assessed this level, referencing what the teen actually said or how it fits the conversation so far."
   },
-  "pattern_observations": []
+  "pattern_observations": [
+    {
+      "title": "Short pattern name, e.g. 'Avoids discussing home life after academic topics'",
+      "reasoning": "Why you believe this pattern is present, grounded in the actual conversation.",
+      "dimensions": ["family", "academic"],
+      "severity": "low | medium | high"
+    }
+  ]
 }
+Only include entries in pattern_observations that you are genuinely confident about from the
+actual conversation — return an empty list if nothing stands out yet. Do not invent patterns
+to fill the schema.
+"""
+
+AGENTIC_SYSTEM_PROMPT = """
+You are the reasoning layer of a teen wellbeing AI agent. You do not talk to the teenager
+directly here — your job is to decide, using the tools available to you, whether:
+1. This message fits a pattern already on file for this teen (use check_pattern_history).
+2. You need to formally flag a risk level for this message (use flag_risk_level — always call
+   this exactly once with your honest assessment: NORMAL, CONCERNING, HIGH_CONCERN, or
+   IMMEDIATE_SAFETY).
+3. A real human (counselor/guardian/helpline) should be notified right now (use
+   trigger_escalation) — only call this for HIGH_CONCERN or IMMEDIATE_SAFETY situations, and
+   explain briefly why in the `reason` argument, quoting or referencing what the teen said.
+
+Be honest and conservative: under-flagging risk is far more dangerous than over-flagging it.
+After using the tools you judge necessary, reply with a short one-sentence internal note
+summarizing your assessment (this note is not shown to the teenager).
 """
 
 
-# Tool definitions for Groq function calling
-GROQ_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "check_pattern_history",
-            "description": "Query database for previously detected behavioural patterns for this user.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_id": {
-                        "type": "string",
-                        "description": "The user's UUID string"
-                    }
-                },
-                "required": ["user_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "trigger_escalation",
-            "description": "Request an escalation alert for this user when you assess HIGH_CONCERN or IMMEDIATE_SAFETY.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Specific reason citing evidence from conversation."
-                    }
-                },
-                "required": ["reason"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "flag_risk_level",
-            "description": "Propose a formal risk level with detailed reasoning.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "level": {
-                        "type": "string",
-                        "enum": ["NORMAL", "CONCERNING", "HIGH_CONCERN", "IMMEDIATE_SAFETY"],
-                        "description": "Proposed risk level."
-                    },
-                    "reasoning": {
-                        "type": "string",
-                        "description": "Evidence from conversation."
-                    }
-                },
-                "required": ["level", "reasoning"]
-            }
-        }
+def _build_tools(active_patterns: List[Dict[str, Any]]):
+    """
+    Builds the callable tool functions and a shared results dict that
+    captures what the model actually decided to call. Passed to Gemini's
+    automatic function calling so the MODEL decides when/whether to call
+    these — nothing here is pre-computed and handed to it.
+    """
+    results: Dict[str, Any] = {
+        "risk_flag": None,
+        "escalation_requested": False,
+        "escalation_reason": None,
+        "checked_pattern_history": False,
     }
-]
+
+    def check_pattern_history() -> str:
+        """Look up this teenager's previously detected recurring behavioral patterns, to judge whether the current message fits something already on file or represents something new."""
+        results["checked_pattern_history"] = True
+        if not active_patterns:
+            return "No significant recurring patterns are on file for this teen yet."
+        return "; ".join(
+            f"{p.get('title')} (severity: {p.get('severity', 'unknown')})"
+            for p in active_patterns
+        )
+
+    def flag_risk_level(level: str, reasoning: str) -> str:
+        """Record your assessed risk level for this message and conversation. `level` MUST be exactly one of: NORMAL, CONCERNING, HIGH_CONCERN, IMMEDIATE_SAFETY. `reasoning` should briefly explain why, referencing what the teen actually said."""
+        clean_level = (level or "").strip().upper()
+        if clean_level not in VALID_RISK_LEVELS:
+            clean_level = "NORMAL"
+        results["risk_flag"] = {"level": clean_level, "reasoning": reasoning}
+        return f"Risk level {clean_level} recorded."
+
+    def trigger_escalation(reason: str) -> str:
+        """Call this ONLY if you believe a real trained human (counselor, guardian, or helpline staff) should be notified right now because of what the teenager said. `reason` should briefly explain why, in your own words."""
+        results["escalation_requested"] = True
+        results["escalation_reason"] = reason
+        return "Escalation request recorded — a human will be notified."
+
+    return results, [check_pattern_history, flag_risk_level, trigger_escalation]
 
 
 class LLMAgent:
     """
-    Agentic AI Wellbeing Companion powered by Groq API.
+    Core conversational agent powered by Google Gemini with graceful fallback.
+
+    Has two phases:
+      1. run_agentic_reasoning() — gives the model real callable tools
+         (check_pattern_history, flag_risk_level, trigger_escalation) and
+         lets IT decide when to use them. This is the actual "agent"
+         behavior, distinct from just generating reply text.
+      2. generate_response() — produces the conversational reply plus a
+         structured risk_assessment/pattern_observations payload used as
+         the PRIMARY risk signal (the regex/threshold engine in
+         risk_classifier.py remains a safety floor that can only escalate
+         this upward, never downgrade it — see routers/chat.py).
     """
+
+    @classmethod
+    def run_agentic_reasoning(
+        cls,
+        user_message: str,
+        conversation_history: List[Dict[str, str]],
+        active_patterns: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Lets the model itself decide whether to check pattern history, flag
+        a risk level, and/or request escalation, via real Gemini tool-use
+        (automatic function calling actually invokes the Python functions
+        below when the model chooses to call them).
+        """
+        default = {
+            "risk_flag": None,
+            "escalation_requested": False,
+            "escalation_reason": None,
+            "checked_pattern_history": False,
+        }
+
+        if not (llm_available and genai):
+            return default
+
+        try:
+            results, tool_fns = _build_tools(active_patterns)
+
+            model = genai.GenerativeModel(
+                model_name="gemini-1.5-flash",
+                system_instruction=AGENTIC_SYSTEM_PROMPT,
+                tools=tool_fns,
+            )
+            chat = model.start_chat(enable_automatic_function_calling=True)
+
+            history_snippet = json.dumps(conversation_history[-6:])
+            prompt = (
+                f"Conversation so far (most recent last): {history_snippet}\n\n"
+                f'Teenager just said: "{user_message}"\n\n'
+                "Use your tools as needed, then give a one-sentence internal summary."
+            )
+            chat.send_message(prompt)
+            return results
+
+        except Exception:
+            logger.exception("Agentic tool-use phase failed; continuing without it")
+            return default
 
     @classmethod
     def generate_response(
@@ -183,167 +214,68 @@ class LLMAgent:
         active_patterns: List[Dict[str, Any]],
         risk_level: str,
         safety_guidance: Dict[str, Any],
-        user_profile: Dict[str, Any] = None,
-        nlp_signals: Dict[str, Any] = None,
-        wellbeing_state_cache: Optional[Dict[str, Any]] = None,
-        db=None,
-        user_id: str = None,
-        conversation_id: str = None,
+        user_profile: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Generates empathetic response using Groq API with structured JSON output,
-        grounded in RoBERTa Sentiment & GoEmotions signals.
+        Generates empathetic response with context injection, plus the
+        model's own structured risk_assessment and pattern_observations.
         """
-        global groq_client, llm_available
+        if llm_available and genai:
+            try:
+                model = genai.GenerativeModel(
+                    model_name="gemini-1.5-flash",
+                    system_instruction=SYSTEM_PROMPT,
+                    generation_config={"response_mime_type": "application/json", "temperature": 0.7}
+                )
 
-        # Check if Groq client can be lazily re-initialized if key was updated
-        if not groq_client:
-            current_key = os.getenv("GROQ_API_KEY", "")
-            if current_key and current_key != "your_groq_api_key_here":
-                try:
-                    from groq import Groq
-                    groq_client = Groq(api_key=current_key)
-                    llm_available = True
-                except Exception:
-                    pass
+                context_prompt = f"""
+Current User State:
+- Current Wellbeing Scores: {json.dumps(current_scores)}
+- Active Life Patterns: {json.dumps([p.get('title') for p in active_patterns])}
+- Current Safety Assessment (from rule-based safety floor): {risk_level}
+- Safety Guidance: {safety_guidance.get('message', '')}
+- Conversation History:
+{json.dumps(conversation_history[-6:])}
 
-        if llm_available and groq_client:
-            models_to_try = [GROQ_MODEL] + [m for m in FALLBACK_MODELS if m != GROQ_MODEL]
-            last_error = None
+Teenager says:
+"{user_message}"
+"""
+                response = model.generate_content(context_prompt)
+                parsed = json.loads(response.text)
+                return cls._sanitize_llm_output(parsed)
+            except Exception as e:
+                logger.warning("Gemini call failed, using intelligent fallback: %s", e)
 
-            for model_name in models_to_try:
-                try:
-                    # ── Build prompt messages ──
-                    context_prompt = cls._build_context_prompt(
-                        user_message, conversation_history, current_scores,
-                        active_patterns, risk_level, safety_guidance, user_profile,
-                        nlp_signals, wellbeing_state_cache
-                    )
-
-                    messages = [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": context_prompt}
-                    ]
-
-                    # Call Groq Chat Completions with JSON Object Mode
-                    response = groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
-                        response_format={"type": "json_object"},
-                        temperature=0.6,
-                        max_tokens=1024,
-                    )
-
-                    response_text = response.choices[0].message.content
-                    parsed = json.loads(response_text)
-
-                    parsed.setdefault("risk_assessment", {
-                        "proposed_level": "NORMAL",
-                        "reasoning": "No explicit risk flag raised by model."
-                    })
-                    parsed.setdefault("pattern_observations", [])
-                    parsed.setdefault("escalation_requested", False)
-                    return parsed
-
-                except Exception as e:
-                    last_error = e
-                    logger.error(
-                        f"[LLMAgent] Groq call failed on model '{model_name}': {type(e).__name__} - {e}",
-                        exc_info=True
-                    )
-
-            if last_error:
-                logger.error(f"[LLMAgent] All Groq models failed. Falling back to deterministic response.")
-
-        # Deterministic fallback
-        return cls._fallback_response(
-            user_message, current_scores, active_patterns, risk_level, safety_guidance
-        )
-
+        # Intelligent deterministic fallback
+        return cls._fallback_response(user_message, current_scores, active_patterns, risk_level, safety_guidance)
 
     @classmethod
-    def _build_context_prompt(
-        cls,
-        user_message: str,
-        conversation_history: List[Dict[str, str]],
-        current_scores: Dict[str, float],
-        active_patterns: List[Dict[str, Any]],
-        risk_level: str,
-        safety_guidance: Dict[str, Any],
-        user_profile: Optional[Dict[str, Any]],
-        nlp_signals: Optional[Dict[str, Any]] = None,
-        wellbeing_state_cache: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        history_window = conversation_history[-12:]
-        history_text = "\n".join(
-            f"  [{m['role'].upper()}]: {m['content']}"
-            for m in history_window
-        )
+    def _sanitize_llm_output(cls, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """Defensively normalizes the LLM's JSON so downstream code never crashes on a malformed field."""
+        parsed.setdefault("response_text", "")
+        parsed.setdefault("emotions_detected", [])
+        parsed.setdefault("dimension_impacts", {})
+        parsed.setdefault("intervention", {"needed": False})
+        parsed.setdefault("suggested_risk_level", "NORMAL")
+        if parsed["suggested_risk_level"] not in VALID_RISK_LEVELS:
+            parsed["suggested_risk_level"] = "NORMAL"
 
-        profile_text = ""
-        if user_profile:
-            profile_text = f"\nUser Profile Context: {json.dumps(user_profile)}"
+        ra = parsed.get("risk_assessment") or {}
+        level = (ra.get("level") or parsed["suggested_risk_level"] or "NORMAL").strip().upper()
+        if level not in VALID_RISK_LEVELS:
+            level = "NORMAL"
+        parsed["risk_assessment"] = {
+            "level": level,
+            "reasoning": ra.get("reasoning", ""),
+        }
 
-        nlp_section = ""
-        if nlp_signals:
-            sentiment = nlp_signals.get("sentiment", {})
-            emotions = nlp_signals.get("emotions", [])
-            nlp_section = f"""
-=== TRANSFORMER NLP ANALYSIS ===
-Overall Sentiment Tone (cardiffnlp/twitter-roberta-base-sentiment-latest): {sentiment.get('label', 'unknown').upper()} (Confidence: {sentiment.get('score', 0):.2f})
-Detected Emotions (SamLowe/roberta-base-go_emotions): {', '.join(emotions) if emotions else 'neutral'}
-"""
+        clean_patterns = []
+        for p in parsed.get("pattern_observations") or []:
+            if isinstance(p, dict) and p.get("title"):
+                clean_patterns.append(p)
+        parsed["pattern_observations"] = clean_patterns
 
-        # ── Wellbeing State Cache (from async background specialist job) ────────
-        # Injected when available — provides deeper dimension-level insights from
-        # the PREVIOUS turn's specialist analysis. If None, this section is omitted
-        # and behaviour is identical to the pre-upgrade fast path.
-        cache_section = ""
-        if wellbeing_state_cache:
-            dims = wellbeing_state_cache.get("dimensions", {})
-            cached_patterns = wellbeing_state_cache.get("patterns", [])
-            job_ran_at = wellbeing_state_cache.get("job_ran_at", "unknown")
-            cache_lines = []
-            for dim, data in dims.items():
-                insights = data.get("insights", [])
-                flags = data.get("flags", [])
-                delta = data.get("score_delta", 0.0)
-                if insights or flags:
-                    cache_lines.append(
-                        f"  {dim.upper()}: delta={delta:+.1f}, flags={flags}, insights={insights}"
-                    )
-            cache_section = (
-                "\n=== WELLBEING STATE CACHE (from prior specialist analysis) ===\n"
-                + "\n".join(cache_lines)
-                + f"\nCached patterns: {[p.get('title') for p in cached_patterns]}"
-                + f"\n(Last updated: {job_ran_at})\n"
-                if cache_lines else ""
-            )
-
-        return f"""
-=== CURRENT USER CONTEXT ===
-Wellbeing Scores (0-100, higher is better):
-{json.dumps(current_scores, indent=2)}
-
-Rule-Based Risk Assessment (safety floor): {risk_level}
-Safety Guidance: {safety_guidance.get('message', 'None')}
-
-Active Detected Patterns:
-{json.dumps([p.get('title') for p in active_patterns], indent=2)}
-{profile_text}
-{nlp_section}{cache_section}
-=== CONVERSATION HISTORY ===
-{history_text}
-
-=== LATEST MESSAGE FROM TEENAGER ===
-"{user_message}"
-
-=== YOUR TASK ===
-1. Respond with deep empathy tailored to the detected emotional tone and ask one gentle follow-up question.
-2. Assess risk_level across the FULL conversation.
-3. Identify cross-dimensional patterns.
-4. Return ONLY valid JSON matching the schema.
-"""
+        return parsed
 
     @classmethod
     def _fallback_response(
@@ -352,83 +284,90 @@ Active Detected Patterns:
         current_scores: Dict[str, float],
         active_patterns: List[Dict[str, Any]],
         risk_level: str,
-        safety_guidance: Dict[str, Any],
+        safety_guidance: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Deterministic fallback when Groq API is unavailable.
-        """
         text_lower = user_message.lower()
 
-        def make_response(text, emotions, dim_impacts, intervention_type, title, content, proposed_level):
-            return {
-                "response_text": text,
-                "emotions_detected": emotions,
-                "dimension_impacts": dim_impacts,
+        if risk_level == "IMMEDIATE_SAFETY":
+            return cls._sanitize_llm_output({
+                "response_text": "I can hear how much pain you're in right now, and I want you to know you don't have to carry this alone. Please reach out to someone who can help keep you safe — a family member, a counselor, or the free 24/7 helplines right on your screen.",
+                "emotions_detected": ["hopeless", "distressed"],
+                "dimension_impacts": {"lifestyle": -10.0, "social": -10.0},
                 "intervention": {
                     "needed": True,
-                    "type": intervention_type,
-                    "title": title,
-                    "content": content,
+                    "type": "emergency_helpline",
+                    "title": "Immediate Care & Support",
+                    "content": "Please connect with a trusted person or free crisis helpline right away."
                 },
-                "risk_assessment": {
-                    "proposed_level": proposed_level,
-                    "reasoning": f"Deterministic safety fallback active (Risk: {risk_level})"
-                },
+                "suggested_risk_level": "IMMEDIATE_SAFETY",
+                "risk_assessment": {"level": "IMMEDIATE_SAFETY", "reasoning": "Fallback path triggered by rule-based safety floor."},
                 "pattern_observations": [],
-                "escalation_requested": False,
-            }
-
-        if risk_level == "IMMEDIATE_SAFETY":
-            return make_response(
-                "I hear how much pain you're carrying right now, and you do not have to go through this alone. I've automatically placed a priority emergency alert and dispatch call to your designated emergency contact with what you shared so trusted support can reach you immediately. I'm staying right here with you.",
-                ["hopeless", "distressed"],
-                {"lifestyle": -10.0, "social": -10.0},
-                "emergency_dispatch", "Priority Emergency Call Dispatched",
-                "Automated emergency voice call & SMS dispatched to your designated emergency contact sharing your situation.",
-                "IMMEDIATE_SAFETY"
-            )
+            })
 
         if risk_level == "HIGH_CONCERN":
-            return make_response(
-                "It sounds like everything is piling up at once, and that's really exhausting. Talking to someone you trust, like a parent, favorite teacher, or counselor, could give you some real breathing room. How does that idea feel to you?",
-                ["overwhelmed", "exhausted"],
-                {"academic": -8.0, "lifestyle": -6.0},
-                "trusted_human_referral", "Reach Out to a Trusted Mentor",
-                "Consider speaking with a counselor, mentor, or parent about the pressure you're carrying.",
-                "HIGH_CONCERN"
-            )
+            return cls._sanitize_llm_output({
+                "response_text": "It sounds like everything is piling up at once, and that's really exhausting. You don't have to navigate this completely on your own — talking to someone you trust, like a favorite teacher, parent, or counselor, could give you some real breathing room. How does that idea feel to you?",
+                "emotions_detected": ["overwhelmed", "exhausted"],
+                "dimension_impacts": {"academic": -8.0, "lifestyle": -6.0},
+                "intervention": {
+                    "needed": True,
+                    "type": "trusted_human_referral",
+                    "title": "Reach Out to a Trusted Mentor",
+                    "content": "Consider speaking with a counselor, mentor, or parent about the pressure you're carrying."
+                },
+                "suggested_risk_level": "HIGH_CONCERN",
+                "risk_assessment": {"level": "HIGH_CONCERN", "reasoning": "Fallback path triggered by rule-based safety floor."},
+                "pattern_observations": [],
+            })
 
-        if any(kw in text_lower for kw in ["exam", "study", "test", "grade"]):
-            return make_response(
-                "Exams and school workload can feel like a nonstop weight on your shoulders. Are you finding any time during the day to step away and just catch your breath?",
-                ["anxious"],
-                {"academic": -6.0, "lifestyle": -3.0},
-                "coping_strategy", "Micro Study Breaks",
-                "Try 25 minutes of focused review followed by 5 minutes of stretching away from screens.",
-                "CONCERNING"
-            )
+        # Pattern-specific conversational handling
+        if "exam" in text_lower or "study" in text_lower or "test" in text_lower or "grade" in text_lower:
+            base = {
+                "response_text": "Exams and school workload can feel like a nonstop weight on your shoulders, especially when you want to do well. Are you finding any time during the day to step away and just catch your breath?",
+                "emotions_detected": ["anxious"],
+                "dimension_impacts": {"academic": -6.0, "lifestyle": -3.0},
+                "intervention": {
+                    "needed": True,
+                    "type": "coping_strategy",
+                    "title": "Micro Study Breaks",
+                    "content": "Try 25 minutes of focused review followed by 5 minutes of stretching or music away from screens."
+                },
+                "suggested_risk_level": "NORMAL",
+            }
+            return cls._sanitize_llm_output(base)
 
-        if any(kw in text_lower for kw in ["sleep", "tired", "phone", "scroll"]):
-            return make_response(
-                "It's so easy to stay up late scrolling just to get some free time to yourself, but waking up completely drained makes the whole next day harder. What time do you usually end up putting your phone down at night?",
-                ["exhausted"],
-                {"digital": -5.0, "lifestyle": -5.0},
-                "routine_suggestion", "Night Wind-Down Routine",
-                "Switch your screen to night mode or listen to a relaxing audio track 20 minutes before sleeping.",
-                "NORMAL"
-            )
+        if "sleep" in text_lower or "tired" in text_lower or "phone" in text_lower or "scroll" in text_lower:
+            base = {
+                "response_text": "It's so easy to stay up late scrolling just to get some free time to yourself, but waking up completely drained makes the whole next day harder. What time do you usually end up putting your phone down at night?",
+                "emotions_detected": ["exhausted"],
+                "dimension_impacts": {"digital": -5.0, "lifestyle": -5.0},
+                "intervention": {
+                    "needed": True,
+                    "type": "routine_suggestion",
+                    "title": "Night Wind-Down Routine",
+                    "content": "Switch your screen to night mode or listen to a relaxing audio track 20 minutes before sleeping."
+                },
+                "suggested_risk_level": "NORMAL",
+            }
+            return cls._sanitize_llm_output(base)
 
-        if any(kw in text_lower for kw in ["lonely", "friend", "people"]):
-            return make_response(
-                "Feeling disconnected from people around you is really tough. Even in a crowded room or online, loneliness can sneak in. Is there one person you usually feel most comfortable being yourself around?",
-                ["lonely"],
-                {"social": -5.0},
-                "reflective_question", "Reconnect with One Person",
-                "Send a simple low-pressure message to a friend you haven't caught up with recently.",
-                "NORMAL"
-            )
+        if "lonely" in text_lower or "friend" in text_lower or "people" in text_lower:
+            base = {
+                "response_text": "Feeling disconnected from the people around you is really tough. Even in a crowded room or online, loneliness can sneak in. Is there one person you usually feel most comfortable being yourself around?",
+                "emotions_detected": ["lonely"],
+                "dimension_impacts": {"social": -5.0},
+                "intervention": {
+                    "needed": True,
+                    "type": "reflective_question",
+                    "title": "Reconnect with One Person",
+                    "content": "Send a simple low-pressure message to a friend you haven't caught up with recently."
+                },
+                "suggested_risk_level": "NORMAL",
+            }
+            return cls._sanitize_llm_output(base)
 
-        return {
+        # General friendly check-in
+        base = {
             "response_text": "Thank you for sharing that with me. I'm right here listening. How have you been feeling overall with everything going on this week?",
             "emotions_detected": ["reflective"],
             "dimension_impacts": {},
@@ -438,10 +377,6 @@ Active Detected Patterns:
                 "title": "Open Check-in",
                 "content": "Reflecting on your current week."
             },
-            "risk_assessment": {
-                "proposed_level": "NORMAL",
-                "reasoning": "No distress signals detected; fallback active."
-            },
-            "pattern_observations": [],
-            "escalation_requested": False,
+            "suggested_risk_level": "NORMAL",
         }
+        return cls._sanitize_llm_output(base)

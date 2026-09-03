@@ -19,7 +19,7 @@ export default function PatternCards({ patterns }: PatternCardsProps) {
   if (!patterns || patterns.length === 0) {
     return (
       <div className="glass-panel p-6 rounded-2xl text-center text-slate-400 text-sm">
-        No persistent concerning loops detected. Keep chatting naturally with Aura!
+        ✨ No persistent concerning loops detected. Keep chatting naturally with Aura!
       </div>
     );
   }
@@ -29,6 +29,7 @@ export default function PatternCards({ patterns }: PatternCardsProps) {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
+            <span className="text-xl">🔄</span>
             <h3 className="font-bold text-white text-base">Identified Life Patterns</h3>
           </div>
           <p className="text-xs text-slate-400">

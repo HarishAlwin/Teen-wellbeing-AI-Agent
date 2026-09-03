@@ -1,61 +1,14 @@
-# Teen Wellbeing Intelligence — Voice-First AI Agent
+# Teen Wellbeing Intelligence — Voice-First AI
 
-An AI-powered voice wellbeing companion for teenagers that listens with empathy, understands 5 core life dimensions, detects patterns early, and provides **automated escalation to counselors/guardians** before situations become critical.
-
----
-
-## 🧠 Agent Architecture (v2 — Agentic Upgrade)
-
-```
-Teenager 🗣️
-  ↓
-Voice / Text Message
-  ↓
-┌─────────────────────────────────────────────────────────┐
-│  SAFETY FLOOR (runs FIRST, always)                       │
-│  RiskClassifier — regex/threshold rules                  │
-│  IMMEDIATE_SAFETY, HIGH_CONCERN, CONCERNING, NORMAL      │
-└───────────────────┬─────────────────────────────────────┘
-                    │ rule_level (floor — cannot be lowered)
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  LLM AGENT — Gemini 1.5 Flash (PRIMARY signal)           │
-│  • Reasons over FULL conversation history                │
-│  • Returns risk_assessment.proposed_level + reasoning    │
-│  • Returns pattern_observations (LLM-observed patterns)  │
-│  • Tool-use: check_pattern_history, flag_risk_level,     │
-│    trigger_escalation (function calling)                 │
-└───────────────────┬─────────────────────────────────────┘
-                    │ llm_proposed_level
-                    ▼
-        final = max(rule_level, llm_level)
-        [Rule engine can escalate, NEVER downgrade LLM]
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ESCALATION SERVICE (Task 1)                             │
-│  Triggers on HIGH_CONCERN / IMMEDIATE_SAFETY             │
-│  → Writes Escalation record to DB (audit trail)          │
-│  → Optional SMTP email alert (ESCALATION_EMAIL_ENABLED)  │
-└─────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  PATTERN DETECTOR (Task 3 — Adaptive)                    │
-│  Rule-based patterns (source: "rule_based")              │
-│  + LLM-observed patterns (source: "llm")                 │
-│  → Merged, deduplicated by title                         │
-└─────────────────────────────────────────────────────────┘
-                    │
-           ┌────────┴────────┐
-           ▼                 ▼
-   Teen Dashboard     Counselor /alerts
-   (chat, graph)      (escalation audit)
-```
+An AI-powered voice wellbeing companion for teenagers that listens with empathy, understands 5 core life dimensions, detects patterns early, and provides preventive human-support escalation before situations become critical.
 
 ---
 
-## 🌟 Core System Features
+## 🌟 Core System Architecture
+
+```
+Teenager 🗣️ ↔ Voice AI Wellbeing Agent 🧠 ↔ Multi-Dimension Analysis 📊 ↔ Pattern Detection 🔄 ↔ Personal Wellbeing Profile & Graph 🕸️ ↔ Preventive Human Escalation 🛡️
+```
 
 ### 1. 5 Core Life Dimensions
 - **Social**: Friendships, peer pressure, isolation, drama, social confidence.
@@ -64,55 +17,36 @@ Voice / Text Message
 - **Digital**: Late-night phone browsing, doomscrolling, comparison.
 - **Lifestyle**: Sleep duration, routine, energy, fatigue, meals.
 
-### 2. Adaptive Pattern Detection
-Identifies compound linkages using **two complementary engines**:
-- **Rule-based engine** (always runs): 6 deterministic cross-dimensional patterns, baseline deviation detection, multi-session trend tracking.
-- **LLM-observed patterns** (Task 3): Gemini observes subtler patterns (perfectionism, identity stress, seasonal low mood) that rules can't catch. Each pattern is tagged `source: "llm"` or `source: "rule_based"`.
-
-Example rule-based chain:
+### 2. Cross-Dimensional Pattern Recognition
+Identifies compound linkages such as:
 > **Academic Pressure ↑ → Late Screen Use ↑ → Sleep Disruption ↓ → Daytime Fatigue ↑ → Social Withdrawal ↑**
 
-### 3. Multilevel Safety & Escalation (Task 1)
-| Level | Action |
-|-------|--------|
-| NORMAL | Supportive, reflective check-in |
-| CONCERNING | Gentle inquiry, micro-coping actions |
-| HIGH_CONCERN | Counselor suggestion + **automated Escalation record** |
-| IMMEDIATE_SAFETY | Crisis guidance + click-to-dial + **automated Escalation record** |
-
-### 4. LLM-Driven Risk Judgment (Task 2)
-The LLM (Gemini 1.5 Flash) is the **primary signal** for risk assessment:
-- Reasons over the full conversation history (last 12 turns).
-- Returns `risk_assessment.proposed_level` with explicit `reasoning`.
-- The deterministic `RiskClassifier` acts as a **mandatory safety floor** — it can only escalate the LLM's level upward, never downgrade it.
-
-### 5. Gemini Tool-Use / Agentic Behaviour (Task 4)
-The agent uses Gemini function calling with 3 tools:
-- `check_pattern_history(user_id)` — queries DB for historical patterns.
-- `trigger_escalation(reason)` — requests human escalation with reasoning.
-- `flag_risk_level(level, reasoning)` — formally proposes a risk level.
+### 3. Multilevel Safety & Escalation
+- **NORMAL**: Supportive, reflective check-in.
+- **CONCERNING**: Gentle inquiry, micro-coping actions, trusted adult encouragement.
+- **HIGH CONCERN**: Clear preventive guidance, counselor/mentor suggestion, 24/7 helplines.
+- **IMMEDIATE SAFETY**: Immediate crisis guidance, direct click-to-dial emergency numbers (112, 1098, 14416).
 
 ---
 
-## 📡 API Endpoints
+## 📞 Powered by CALL-E — Autonomous AI Phone Escalation
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/chat` | Main agent endpoint. Returns `risk_assessment`, `active_patterns` (with `source`), `escalation_triggered`. |
-| `GET` | `/api/dashboard/{user_id}` | Teen's wellbeing dashboard data. |
-| `GET` | `/api/alerts` | **Counselor/guardian view** — lists all escalation records. |
-| `PATCH` | `/api/alerts/{id}/status` | Update alert status: `acknowledged` \| `resolved`. |
-| `POST` | `/api/speech/transcribe` | Audio → text (Deepgram). |
-| `POST` | `/api/speech/synthesize` | Text → audio (ElevenLabs). |
-| `GET` | `/docs` | Interactive OpenAPI documentation. |
+Aura integrates **[CALL-E](https://docs.heycall-e.com/)** (`calle-ai`) as its primary, intelligent escalation channel. 
 
-### `/api/alerts` Query Params
-| Param | Description |
-|-------|-------------|
-| `risk_level` | Filter: `HIGH_CONCERN` or `IMMEDIATE_SAFETY` |
-| `status` | Filter: `pending`, `notified`, `acknowledged`, `resolved` |
-| `limit` | Max results (default 50, max 200) |
-| `offset` | Pagination offset |
+When a teenager's message is assessed at **HIGH_CONCERN** or **IMMEDIATE_SAFETY**, the system does not simply log an alert in a dashboard or send a static robocall. Instead, Aura's backend dispatches an autonomous AI voice call via the CALL-E SDK to the on-call counselor or student support staff:
+
+1. **Natural AI-to-Human Conversation**: CALL-E calls the designated counselor number, speaks naturally in their local language/region, and provides a clear situation briefing detailing the detected risk level and specific reasons.
+2. **Context-Aware Follow-up & Confirmation**: CALL-E confirms whether the counselor is reached, checks if they can follow up with the student, and asks for immediate guidance.
+3. **Structured & Schema-Validated Outcomes**: Upon call completion, CALL-E returns a structured JSON result validated against a strict JSON Schema:
+   - `counselor_reached`: `yes` | `no` | `unknown`
+   - `acknowledged`: `yes` | `no` | `unknown`
+   - `recommended_next_step`: `dispatch_now` | `schedule_followup` | `no_action_needed` | `retry_later` | `unknown`
+   - `notes`: Key notes and guidance transcribed from the conversation
+4. **Actionable Counselor Dashboard**: These structured insights are automatically stored in the `Escalation` audit record and surfaced via `GET /api/alerts`, giving school staff and counselors immediate visibility into what the call accomplished and what next steps were agreed upon.
+5. **Robust Fallback**: If CALL-E is not configured, the system gracefully falls back to Twilio SMS/Voice or secure audit logging.
+
+> *Built for the CALL-E Hackathon demonstrating real-world agentic voice SDK integration for preventative adolescent mental health support.*
+
 
 ---
 
@@ -121,19 +55,21 @@ The agent uses Gemini function calling with 3 tools:
 ### 1. Prerequisites
 - **Node.js**: v18+
 - **Python**: v3.10+
-- **(Optional) PostgreSQL**: Falls back to SQLite automatically for local dev.
+- **(Optional) PostgreSQL**: PostgreSQL 15+ (falls back to built-in SQLite for immediate local testing)
 
 ### 2. Backend Setup
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env and fill in your API keys (see Environment Variables below)
+# Optional: Add your GEMINI_API_KEY, DEEPGRAM_API_KEY, ELEVENLABS_API_KEY in .env
 
+# Install dependencies
 pip install -r requirements.txt
+
+# Run the FastAPI server
 uvicorn main:app --reload --port 8000
 ```
-Backend runs at `http://localhost:8000`.  
-Docs at `http://localhost:8000/docs`.
+Backend runs at `http://localhost:8000`. Interactive OpenAPI documentation at `http://localhost:8000/docs`.
 
 ### 3. Frontend Setup
 ```bash
@@ -147,32 +83,10 @@ Frontend runs at `http://localhost:3000`.
 ```bash
 docker-compose up --build
 ```
-Create a `.env` in the project root with your keys (see docker-compose.yml).
-
----
-
-## ⚙️ Environment Variables
-
-Copy `backend/.env.example` to `backend/.env` and set:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GEMINI_API_KEY` | Yes | Google Gemini API key |
-| `DEEPGRAM_API_KEY` | For voice | Deepgram STT key |
-| `ELEVENLABS_API_KEY` | For voice | ElevenLabs TTS key |
-| `DATABASE_URL` | No | Postgres URL (defaults to SQLite) |
-| `ESCALATION_EMAIL_ENABLED` | No | `true` to send SMTP alerts (default: `false`) |
-| `SMTP_HOST` | If email enabled | e.g. `smtp.gmail.com` |
-| `SMTP_PORT` | If email enabled | e.g. `587` |
-| `SMTP_USER` | If email enabled | Sender email address |
-| `SMTP_PASS` | If email enabled | SMTP app password |
-| `ALERT_RECIPIENT_EMAIL` | If email enabled | Counselor's email |
 
 ---
 
 ## 🛡️ Responsible AI Principles
-- **Preventive Companion**: Early pattern recognition and supportive listening, not clinical diagnosis.
+- **Preventive Companion**: Designed for early pattern recognition and supportive listening, not clinical diagnosis.
 - **Non-Diagnostic**: Detects patterns and life balances; does not label psychological disorders.
 - **Human Connection First**: Prioritizes connecting teenagers with parents, counselors, and trusted mentors.
-- **Safety Floor Guarantee**: Crisis language regex patterns (CRISIS_PATTERNS, HIGH_CONCERN_PATTERNS) run independently of the LLM and can only escalate, never be bypassed or overridden.
-- **Audit Trail**: Every HIGH_CONCERN/IMMEDIATE_SAFETY message creates an immutable Escalation DB record for counselor review.

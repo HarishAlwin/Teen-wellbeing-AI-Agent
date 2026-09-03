@@ -1,17 +1,10 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime
 
 class PatternDetector:
     """
     Identifies cross-dimensional linkages, behavioral deviations from baseline,
     and temporal trends in a teenager's life.
-
-    Task 3: detect_patterns() now also accepts llm_pattern_observations — a list of
-    patterns proposed by the LLM (from llm_agent.py). These are merged into the returned
-    list alongside rule-based patterns, each tagged with a "source" field:
-      - "source": "rule_based"  — from the deterministic rules below (always run)
-      - "source": "llm"         — proposed by Gemini based on conversation analysis
-    This makes it clear to downstream consumers which patterns were detected how.
     """
 
     @classmethod
@@ -21,13 +14,10 @@ class PatternDetector:
         baseline_scores: Dict[str, float],
         signals: Dict[str, List[str]],
         emotions: List[str],
-        recent_history_scores: List[Dict[str, float]] = None,
-        # Task 3: LLM-proposed patterns from llm_agent.py
-        llm_pattern_observations: Optional[List[Dict[str, Any]]] = None,
+        recent_history_scores: List[Dict[str, float]] = None
     ) -> List[Dict[str, Any]]:
         """
         Returns detected patterns with dimensions involved, severity, title, and descriptive explanation.
-        Each pattern has a "source" field: "rule_based" or "llm".
         """
         patterns = []
 
@@ -41,49 +31,23 @@ class PatternDetector:
             patterns.append({
                 "title": "Academic Pressure & Late-Night Screen Sleep Cycle",
                 "description": "High academic demands correlate with late-night phone browsing, resulting in disrupted sleep and compounding fatigue.",
+                "source": "rule_based",
                 "category": "cross_dimensional",
                 "severity": "high" if "exhausted" in emotions or "overwhelmed" in emotions else "medium",
                 "dimensions_involved": ["academic", "digital", "lifestyle"],
-                "evidence_snippets": ["Study workload causing stress", "Compulsive late-night screen time", "Fatigue and sleep reduction"],
-                "source": "rule_based",
+                "evidence_snippets": ["Study workload causing stress", "Compulsive late-night screen time", "Fatigue and sleep reduction"]
             })
 
         if lifestyle_deficit and social_withdrawal:
             patterns.append({
                 "title": "Fatigue-Induced Social Withdrawal",
                 "description": "Physical tiredness and low energy levels appear linked to pulling away from social connections and peer interactions.",
+                "source": "rule_based",
                 "category": "cross_dimensional",
                 "severity": "medium",
                 "dimensions_involved": ["lifestyle", "social"],
-                "evidence_snippets": ["Low energy routines", "Decreased social interaction and feelings of isolation"],
-                "source": "rule_based",
+                "evidence_snippets": ["Low energy routines", "Decreased social interaction and feelings of isolation"]
             })
-
-        # GoEmotions-Driven Pattern: Chronic Nervousness & Perfectionism Strain
-        if "nervousness" in emotions or "fear" in emotions:
-            if academic_stress or current_scores.get("academic", 70) < 60:
-                patterns.append({
-                    "title": "Exam Anticipation & Nervous Overload",
-                    "description": "Fine-grained emotional signals detect persistent nervousness and performance worry tied to upcoming academic milestones.",
-                    "category": "cross_dimensional",
-                    "severity": "high" if "fear" in emotions else "medium",
-                    "dimensions_involved": ["academic", "lifestyle"],
-                    "evidence_snippets": ["GoEmotions flagged acute nervousness", "Academic pressure detected"],
-                    "source": "roberta_nlp",
-                })
-
-        # GoEmotions-Driven Pattern: Disappointment & Self-Isolation Loop
-        if "disappointment" in emotions or "grief" in emotions or "sadness" in emotions:
-            if social_withdrawal or current_scores.get("social", 70) < 60:
-                patterns.append({
-                    "title": "Disappointment & Interpersonal Disconnection",
-                    "description": "Feelings of disappointment or sadness correlate with withdrawing from peer groups and social support networks.",
-                    "category": "cross_dimensional",
-                    "severity": "medium",
-                    "dimensions_involved": ["social", "family"],
-                    "evidence_snippets": ["GoEmotions identified sadness/disappointment", "Social interaction scores lower than baseline"],
-                    "source": "roberta_nlp",
-                })
 
         # 2. Family Pressure & Academic Anxiety Link
         family_conflict = current_scores.get("family", 70) < 55 or any("negative" in s for s in signals.get("family", []))
@@ -91,11 +55,11 @@ class PatternDetector:
             patterns.append({
                 "title": "Family Expectation & Academic Anxiety Amplification",
                 "description": "Pressure regarding grades or expectations at home is intensifying stress surrounding school performance.",
+                "source": "rule_based",
                 "category": "cross_dimensional",
                 "severity": "medium",
                 "dimensions_involved": ["family", "academic"],
-                "evidence_snippets": ["Heightened parental expectations", "Anxiety over test scores"],
-                "source": "rule_based",
+                "evidence_snippets": ["Heightened parental expectations", "Anxiety over test scores"]
             })
 
         # 3. Sudden Deviation from Baseline
@@ -105,11 +69,11 @@ class PatternDetector:
                 patterns.append({
                     "title": f"Significant Baseline Deviation in {dim.capitalize()}",
                     "description": f"Recent {dim} balance ({score:.0f}) has dropped noticeably below personal baseline ({base:.0f}).",
+                    "source": "rule_based",
                     "category": "deviation",
                     "severity": "medium",
                     "dimensions_involved": [dim],
-                    "evidence_snippets": [f"{dim.capitalize()} score dropped {base - score:.1f} pts below normal baseline"],
-                    "source": "rule_based",
+                    "evidence_snippets": [f"{dim.capitalize()} score dropped {base - score:.1f} pts below normal baseline"]
                 })
 
         # 4. Multi-session Trend Evaluation (if history available)
@@ -121,41 +85,64 @@ class PatternDetector:
                     patterns.append({
                         "title": f"Declining Trend in {dim.capitalize()}",
                         "description": f"{dim.capitalize()} wellbeing has shown a downward pattern across consecutive sessions.",
+                        "source": "rule_based",
                         "category": "trend",
                         "severity": "high" if vals[2] < 45 else "medium",
                         "dimensions_involved": [dim],
-                        "evidence_snippets": [f"Steady drop from {vals[0]:.0f} to {vals[2]:.0f} across recent checkpoints"],
-                        "source": "rule_based",
+                        "evidence_snippets": [f"Steady drop from {vals[0]:.0f} to {vals[2]:.0f} across recent checkpoints"]
                     })
                 elif vals[0] < vals[1] < vals[2] and (vals[2] - vals[0]) >= 10.0:
                     patterns.append({
                         "title": f"Positive Recovery Trend in {dim.capitalize()}",
                         "description": f"{dim.capitalize()} habits have steadily improved over the past sessions.",
+                        "source": "rule_based",
                         "category": "trend",
                         "severity": "low",
                         "dimensions_involved": [dim],
-                        "evidence_snippets": [f"Improvement from {vals[0]:.0f} to {vals[2]:.0f}"],
-                        "source": "rule_based",
+                        "evidence_snippets": [f"Improvement from {vals[0]:.0f} to {vals[2]:.0f}"]
                     })
 
-        # ── Task 3: Merge LLM-proposed pattern observations ────────────────────
-        # LLM patterns are additive to the rule-based set. We deduplicate by title
-        # (case-insensitive) so LLM does not re-surface what rules already caught.
-        if llm_pattern_observations:
-            existing_titles = {p["title"].lower() for p in patterns}
-            for llm_pat in llm_pattern_observations:
-                title = llm_pat.get("title", "").strip()
-                if not title or title.lower() in existing_titles:
-                    continue  # Skip duplicates or empty entries
-                patterns.append({
-                    "title": title,
-                    "description": llm_pat.get("description", ""),
-                    "category": llm_pat.get("category", "cross_dimensional"),
-                    "severity": llm_pat.get("severity", "medium"),
-                    "dimensions_involved": llm_pat.get("dimensions_involved", []),
-                    "evidence_snippets": llm_pat.get("evidence_snippets", []),
-                    "source": "llm",  # Clearly marks this as LLM-observed, not rule-derived
-                })
-                existing_titles.add(title.lower())
-
         return patterns
+
+    @classmethod
+    def merge_llm_patterns(
+        cls,
+        rule_based_patterns: List[Dict[str, Any]],
+        llm_pattern_observations: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Merges patterns the LLM proposed (from its own reasoning over the
+        full conversation, not just threshold rules) into the rule-based
+        list, tagged with source="llm" so the frontend/dashboard can show
+        which is which. This is what lets the agent surface patterns that
+        weren't hand-coded in advance — e.g. a compound or subtle pattern
+        the fixed if/else rules above wouldn't catch, like "consistently
+        deflects questions about home life right after mentioning exams."
+
+        LLM observations are only accepted if they include a real title
+        and reasoning — malformed or empty entries from a bad LLM response
+        are silently dropped rather than surfaced as if they were real.
+        """
+        merged = list(rule_based_patterns)
+        existing_titles = {p["title"] for p in merged}
+
+        for obs in llm_pattern_observations or []:
+            title = (obs.get("title") or "").strip()
+            reasoning = (obs.get("reasoning") or obs.get("description") or "").strip()
+            if not title or not reasoning:
+                continue
+            if title in existing_titles:
+                continue
+
+            merged.append({
+                "title": title,
+                "description": reasoning,
+                "category": obs.get("category", "llm_observed"),
+                "severity": obs.get("severity", "medium"),
+                "dimensions_involved": obs.get("dimensions", []),
+                "evidence_snippets": [reasoning],
+                "source": "llm",
+            })
+            existing_titles.add(title)
+
+        return merged

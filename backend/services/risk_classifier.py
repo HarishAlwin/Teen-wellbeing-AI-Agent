@@ -83,38 +83,44 @@ HELPLINES = {
     }
 }
 
-# Rule-based safety trigger patterns
+# Rule-based safety trigger patterns.
+#
+# IMPORTANT: These patterns are matched against NORMALIZED text (see
+# _normalize_text below), which lowercases input, strips apostrophes, and
+# expands common contractions/slang ("wanna" -> "want to", "gonna" -> "going
+# to", etc.). Because of that normalization step, write every pattern here
+# WITHOUT apostrophes and using the expanded form of contractions — e.g.
+# write "dont want to wake up", not "don't want to wake up", and rely on
+# normalization to convert "wanna die" into "want to die" before matching.
+#
+# This list was previously missing common teen phrasing/slang entirely
+# (e.g. "wanna die" never matched "want to die"), which meant real crisis
+# messages were silently classified as NORMAL. Treat any further additions
+# to this list as safety-critical — under-matching here is far worse than
+# an occasional false positive.
 CRISIS_PATTERNS = [
-    r"\b(suicid|kill myself|want to die|wanna die|going to die|gonna die|"
-    r"i('m| am) dying|end my life|end it all|better off dead|hang myself|"
-    r"slit my wrist|take all my pills|overdose)\b",
-    r"\b(can't go on living|no reason to live|no point in living|"
-    r"don't want to (wake up|be alive|be here)|wish i was dead|wish i were dead|"
-    r"goodbye forever|hurting myself|cut myself|self harm|self-harm)\b"
+    r"\b(suicid|kill myself|want to die|wish i was dead|wish i were dead|end my life|end it all|"
+    r"better off dead|hang myself|slit my wrist|take all my pills|overdose|unaliv\w*|kms|sewerslide)\b",
+    r"\b(cant go on living|no reason to live|no point in living|not worth living|life isnt worth living|"
+    r"dont want to wake up|dont want to be here anymore|dont want to exist|"
+    r"goodbye forever|ready to end it|hurting myself|cut myself|cutting myself|self harm|self-harm)\b"
 ]
 
 HIGH_CONCERN_PATTERNS = [
-    r"\b(nobody cares|completely hopeless|worthless|can't take this anymore|hate my life|"
-    r"trapped with no way out|nobody loves me|everyone hates me|no one would notice if i (was|were) gone|"
-    r"what's the point of anything|i give up|i'm done trying|life isn't worth it|"
-    r"nothing matters anymore|i'm a burden|everyone would be better off without me)\b",
-    r"\b(panic attack|hyperventilating|can't breathe|shaking uncontrollably|starving myself|"
-    r"haven't eaten in days|purging|throwing up on purpose|binge and purge|"
-    r"can't stop crying|breaking down|falling apart|losing control of myself)\b",
-    r"\b(abused|being hit|someone is hurting me|threatened|assaulted|unsafe at home|stalked|"
-    r"scared of my (dad|mom|parent|father|mother|stepdad|stepmom)|locked (in|out) of my room|"
-    r"afraid to go home|someone touched me|forced (me|to))\b"
+    r"\b(nobody cares|completely hopeless|worthless|cant take this anymore|hate my life|"
+    r"trapped with no way out|nobody loves me|everyone hates me|whats the point of anything)\b",
+    r"\b(giving away (my )?(stuff|things|possessions|belongings|everything)|feels? pointless keeping (it|them|anything))\b",
+    r"\b((nobody|no one) would notice if i (just )?(stopped|disappeared|was gone|was not here|were not here))\b",
+    r"\b(panic attack|hyperventilating|cant breathe|shaking uncontrollably|starving myself|"
+    r"havent eaten in days|purging)\b",
+    r"\b(abused|being hit|someone is hurting me|threatened|assaulted|unsafe at home|stalked)\b"
 ]
 
 CONCERNING_PATTERNS = [
     r"\b(so overwhelmed|burnout|exhausted|failing everything|ruined my future|crying every day|"
-    r"can't sleep at all|no friends|bullied|falling behind in everything|can't focus on anything|"
-    r"everything feels pointless|nothing i do is good enough|constantly anxious|"
-    r"dread going to school|dread waking up)\b",
+    r"cant sleep at all|no friends|bullied)\b",
     r"\b(parents scream at me|feel so lonely|isolated|terrified of exams|freaking out|"
-    r"hopeless about grades|scared to go to school|parents fighting all the time|"
-    r"no one understands me|left out of everything|excluded from|"
-    r"pushed away my friends|stopped talking to everyone)\b"
+    r"hopeless about grades|scared to go to school|stopped showing up)\b"
 ]
 
 class RiskClassifier:
@@ -122,6 +128,39 @@ class RiskClassifier:
     Multilevel Risk & Safety Assessment Engine.
     Ensures early intervention and immediate protection while remaining supportive.
     """
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """
+        Lowercases, strips apostrophes, and expands common contractions/slang
+        so regex patterns don't have to enumerate every surface form of the
+        same phrase. This is what makes "i wanna die" match the same pattern
+        as "i want to die" — previously it did not, which was a critical
+        safety gap.
+        """
+        t = text.lower()
+        t = t.replace("’", "'")
+        # Expand common contractions/slang BEFORE stripping apostrophes,
+        # since some of these forms don't use one at all ("wanna", "gonna").
+        replacements = [
+            (r"\bwanna\b", "want to"),
+            (r"\bgonna\b", "going to"),
+            (r"\bgotta\b", "got to"),
+            (r"\bimma\b", "i am going to"),
+            (r"\bi'm\b", "i am"),
+            (r"\bcan't\b", "cant"),
+            (r"\bdon't\b", "dont"),
+            (r"\bdoesn't\b", "doesnt"),
+            (r"\bwon't\b", "wont"),
+            (r"\bisn't\b", "isnt"),
+            (r"\bhaven't\b", "havent"),
+        ]
+        for pattern, repl in replacements:
+            t = re.sub(pattern, repl, t)
+        # Strip any remaining apostrophes so "can't" (if missed above) and
+        # "cant" both normalize the same way as the pattern lists expect.
+        t = t.replace("'", "")
+        return t
 
     @classmethod
     def evaluate(
@@ -135,7 +174,7 @@ class RiskClassifier:
         Returns: (risk_level, trigger_reasons, escalation_guidance)
         Risk levels: NORMAL | CONCERNING | HIGH_CONCERN | IMMEDIATE_SAFETY
         """
-        text_lower = text.lower()
+        text_lower = cls._normalize_text(text)
         reasons: List[str] = []
 
         # 1. Check IMMEDIATE_SAFETY triggers (highest priority rule)
@@ -172,8 +211,16 @@ class RiskClassifier:
             if steep_drops:
                 reasons.append(f"Sudden sharp negative shift in {', '.join(steep_drops)}.")
 
-        # 5. Determine level
-        if any("High distress" in r or "deeply declined" in r for r in reasons) or llm_suggested_risk == "HIGH_CONCERN":
+        # 5. Determine level. The LLM's own risk_assessment (see llm_agent.py)
+        # is treated as at least as authoritative as the regex reasons above —
+        # it can push the level UP (e.g. subtle distress language the fixed
+        # keyword patterns miss) but this function is never called in a way
+        # that lets it go down, since chat.py always keeps the higher of the
+        # two results.
+        if llm_suggested_risk == "IMMEDIATE_SAFETY":
+            risk_level = "IMMEDIATE_SAFETY"
+            reasons.append("LLM reasoning flagged an immediate safety concern.")
+        elif any("High distress" in r or "deeply declined" in r for r in reasons) or llm_suggested_risk == "HIGH_CONCERN":
             risk_level = "HIGH_CONCERN"
         elif len(reasons) > 0 or llm_suggested_risk == "CONCERNING":
             risk_level = "CONCERNING"

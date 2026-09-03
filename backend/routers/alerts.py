@@ -1,125 +1,74 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+import uuid
 
 from database import get_db
 from models.escalation import Escalation
-from auth import require_role, get_current_user
+from models.user import User
+
+router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
 
-router = APIRouter(prefix="/api/alerts", tags=["Alerts (Counselor/Guardian View)"])
+class AcknowledgeRequest(BaseModel):
+    pass
 
 
 @router.get("")
-def list_alerts(
-    db: Session = Depends(get_db),
-    current_user=Depends(require_role("counselor")),
-    risk_level: Optional[str] = Query(None, description="Filter by risk level (HIGH_CONCERN, IMMEDIATE_SAFETY)"),
-    status: Optional[str] = Query(None, description="Filter by status (pending, notified, acknowledged, resolved)"),
-    limit: int = Query(50, le=200),
-    offset: int = Query(0, ge=0),
-):
+async def list_alerts(db: Session = Depends(get_db)):
     """
-    GET /api/alerts — Lists all escalation records for counselor/guardian review.
-
-    Requires role: counselor
-    This endpoint is NOT for teen users. It is intended for a counselor-facing
-    dashboard where responsible adults can review flagged conversations.
-
-    Supports optional filtering by risk_level and status.
+    Counselor/guardian-facing view of every escalation ever triggered.
+    This is intentionally a SEPARATE endpoint from anything the teenager's
+    own frontend calls — it is not exposed on the chat/dashboard screens.
     """
-    query = db.query(Escalation).order_by(desc(Escalation.triggered_at))
+    records = db.query(Escalation).order_by(Escalation.triggered_at.desc()).limit(100).all()
 
-    if risk_level:
-        query = query.filter(Escalation.risk_level == risk_level.upper())
-    if status:
-        query = query.filter(Escalation.status == status.lower())
+    results = []
+    for r in records:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        structured_json = None
+        if r.calle_structured_result:
+            try:
+                import json
+                structured_json = json.loads(r.calle_structured_result)
+            except Exception:
+                structured_json = r.calle_structured_result
 
-    total = query.count()
-    alerts = query.offset(offset).limit(limit).all()
+        results.append({
+            "id": str(r.id),
+            "user_id": str(r.user_id),
+            "user_display_name": user.display_name if user else "Unknown",
+            "conversation_id": str(r.conversation_id) if r.conversation_id else None,
+            "risk_level": r.risk_level,
+            "reasons": r.reasons,
+            "notified_channel": r.notified_channel,
+            "call_sid": r.call_sid,
+            "sms_sid": r.sms_sid,
+            "calle_call_id": r.calle_call_id,
+            "calle_task_completed": r.calle_task_completed,
+            "calle_structured_result": structured_json,
+            "status": r.status,
+            "delivery_error": r.delivery_error,
+            "triggered_at": r.triggered_at.isoformat() if r.triggered_at else None,
+            "acknowledged_at": r.acknowledged_at.isoformat() if r.acknowledged_at else None,
+        })
 
-    return {
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "alerts": [
-            {
-                "id": str(a.id),
-                "user_id": str(a.user_id),
-                "conversation_id": str(a.conversation_id) if a.conversation_id else None,
-                "risk_level": a.risk_level,
-                "reason": a.reason,
-                "triggered_at": a.triggered_at.isoformat() if a.triggered_at else None,
-                "notified_channel": a.notified_channel,
-                "status": a.status,
-            }
-            for a in alerts
-        ],
-    }
+    return {"alerts": results, "count": len(results)}
 
 
-@router.patch("/{alert_id}/status")
-def update_alert_status(
-    alert_id: str,
-    new_status: str = Query(..., description="New status: acknowledged | resolved"),
-    db: Session = Depends(get_db),
-    current_user=Depends(require_role("counselor")),
-):
-    """
-    PATCH /api/alerts/{alert_id}/status — Allows a counselor to mark an alert as
-    acknowledged or resolved. Only transitions from 'pending'/'notified' are supported.
-
-    Requires role: counselor
-    """
-    import uuid
+@router.post("/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str, db: Session = Depends(get_db)):
+    from datetime import datetime
     try:
         a_uuid = uuid.UUID(alert_id)
     except ValueError:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid alert ID")
 
-    alert = db.query(Escalation).filter(Escalation.id == a_uuid).first()
-    if not alert:
-        from fastapi import HTTPException
+    record = db.query(Escalation).filter(Escalation.id == a_uuid).first()
+    if not record:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    allowed_transitions = {"acknowledged", "resolved"}
-    if new_status not in allowed_transitions:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail=f"Status must be one of: {allowed_transitions}")
-
-    alert.status = new_status
+    record.status = "acknowledged"
+    record.acknowledged_at = datetime.utcnow()
     db.commit()
-    return {"id": alert_id, "status": alert.status, "message": f"Alert marked as {new_status}"}
-
-
-class DirectCallDispatchRequest(BaseModel):
-    user_message: str
-    phone_number: Optional[str] = None
-    risk_level: Optional[str] = "IMMEDIATE_SAFETY"
-    reason: Optional[str] = "Direct voice dispatch triggered"
-
-
-@router.post("/dispatch-call")
-async def trigger_direct_call_dispatch(
-    req: DirectCallDispatchRequest,
-    current_user=Depends(get_current_user),
-):
-    """
-    POST /api/alerts/dispatch-call — Initiates an automated voice call and SMS
-    to the designated emergency contact sharing the user's message.
-    """
-    from services.emergency_dispatcher import EmergencyDispatcher
-    result = await EmergencyDispatcher.dispatch(
-        user_id=str(current_user.id),
-        user_message=req.user_message,
-        risk_level=req.risk_level or "IMMEDIATE_SAFETY",
-        reason=req.reason or "Direct user command dispatch",
-        target_phone=req.phone_number
-    )
-    return result
-
-
+    return {"status": "success"}

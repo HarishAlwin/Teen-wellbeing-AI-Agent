@@ -49,6 +49,7 @@ export default function GraphVisualizer({ graph }: GraphVisualizerProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
         <div>
           <div className="flex items-center gap-2">
+            <span className="text-xl">🕸️</span>
             <h3 className="font-bold text-white text-base">Personal Wellbeing Topology</h3>
           </div>
           <p className="text-xs text-slate-400">
@@ -224,7 +225,7 @@ export default function GraphVisualizer({ graph }: GraphVisualizerProps) {
       </div>
 
       <div className="mt-2 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-        <span>Tap any node to inspect balance score. Dashed links show active compounding loops.</span>
+        <span>💡 Tap any node to inspect balance score • Dashed links show active compounding loops</span>
         <span>Graph Engine</span>
       </div>
     </div>

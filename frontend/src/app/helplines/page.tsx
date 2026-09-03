@@ -7,7 +7,7 @@ export default function HelplinesPage() {
     {
       category: "LEVEL_1: IMMEDIATE EMERGENCY (INDIA)",
       urgency: "critical",
-      icon: "SOS",
+      icon: "🚨",
       badge: "24/7 PRIORITY LINK",
       items: [
         {
@@ -29,7 +29,7 @@ export default function HelplinesPage() {
     {
       category: "LEVEL_2: PSYCHOLOGICAL & MENTAL SUPPORT",
       urgency: "support",
-      icon: "MHS",
+      icon: "🌱",
       badge: "FREE & CONFIDENTIAL",
       items: [
         {
@@ -65,7 +65,7 @@ export default function HelplinesPage() {
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8 font-mono-hud">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-8 font-mono-hud">
       {/* Top Header */}
       <div className="border-b border-cyan-500/20 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -101,11 +101,7 @@ export default function HelplinesPage() {
           <div key={grp.category} className="space-y-3">
             <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono-hud ${
-                  grp.urgency === "critical"
-                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                    : "bg-cyan-500/10 text-cyan-300 border border-cyan-500/20"
-                }`}>{grp.icon}</span>
+                <span>{grp.icon}</span>
                 <span>{grp.category}</span>
               </div>
               <span className="text-[10px] text-cyan-400 font-bold">{grp.badge}</span>
@@ -129,9 +125,8 @@ export default function HelplinesPage() {
                       </span>
                     </div>
                     <p className="text-xs font-sans text-slate-300 leading-relaxed">{item.desc}</p>
-                    <div className="text-[10px] text-cyan-400 font-medium flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" /></svg>
-                      {item.timing}
+                    <div className="text-[10px] text-cyan-400 font-medium">
+                      ⏰ {item.timing}
                     </div>
                   </div>
 
@@ -143,8 +138,7 @@ export default function HelplinesPage() {
                         : "bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-400/50 text-cyan-300 hover:text-white"
                     }`}
                   >
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
-                    <span>DIAL: {item.number}</span>
+                    <span>📞 DIAL: {item.number}</span>
                   </a>
                 </div>
               ))}

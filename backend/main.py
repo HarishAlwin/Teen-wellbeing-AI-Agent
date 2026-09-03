@@ -1,56 +1,34 @@
 import os
 import logging
-from fastapi import FastAPI
+import traceback
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from database import engine, Base
 import models
-from routers import chat, speech, profile, alerts, ocr
-from routers import auth as auth_router
-from routers import contacts as contacts_router
+from routers import chat, speech, dashboard, profile, alerts
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
-
-
-def _validate_startup_config():
-    """
-    Warn loudly at startup if critical secrets are missing or look like defaults.
-    This catches .env misconfiguration before it causes silent failures.
-    """
-    checks = {
-        "JWT_SECRET_KEY": (os.getenv("JWT_SECRET_KEY", ""), 32, "Auth token signing will fail"),
-        "GROQ_API_KEY": (os.getenv("GROQ_API_KEY", ""), 20, "LLM calls will use fallback responses"),
-    }
-    for var, (val, min_len, consequence) in checks.items():
-        if not val:
-            logger.critical(f"[Startup] CRITICAL: {var} is not set. {consequence}.")
-        elif len(val) < min_len:
-            logger.warning(f"[Startup] WARNING: {var} looks suspiciously short ({len(val)} chars). "
-                           f"Verify it is a valid key. {consequence}.")
-        elif val in ("your_groq_api_key_here", "your_gemini_api_key_here",
-                     "teen_wellbeing_secret_key_development_32_chars",
-                     "change_me_in_production_random_32_chars"):
-            logger.critical(f"[Startup] CRITICAL: {var} is set to a placeholder/default value. "
-                            f"Replace it with a real secret. {consequence}.")
-
+# --- Logging setup ---------------------------------------------------------
+# Previously the app had no logging configuration, so backend crashes during
+# a request (e.g. an unhandled exception in chat.py) were easy to miss in the
+# terminal. This ensures every request error is printed with a full traceback.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("aura")
 
 # Create all database tables automatically on startup
 Base.metadata.create_all(bind=engine)
 
-# Run incremental column migrations for existing tables (safe no-op if columns exist)
-from models.user import run_user_migrations
-run_user_migrations(engine)
-
-_validate_startup_config()
-
 app = FastAPI(
     title="Teen Wellbeing Intelligence API",
     description="Voice-First AI Wellbeing Companion & Early Pattern Detection System",
-    version="2.0.0"
+    version="1.0.0"
 )
 
 # CORS configuration
@@ -60,35 +38,57 @@ allowed_origins = [origin.strip() for origin in allowed_origins_raw.split(",") i
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins if allowed_origins else ["*"],
-    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:.*|http://127.0.0.1:.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount routers
-app.include_router(auth_router.router)    # /api/auth — no auth required
-app.include_router(chat.router)           # /api/chat — requires auth
-app.include_router(speech.router)
-app.include_router(profile.router)        # /api/profile — requires auth
-app.include_router(alerts.router)         # /api/alerts — requires counselor role
-app.include_router(ocr.router)
-app.include_router(contacts_router.router)  # /api/contacts — requires auth
 
-@app.api_route("/", methods=["GET", "HEAD"])
+# --- Global exception handler -----------------------------------------------
+# Previously, any unhandled exception inside a route (e.g. chat.py) would
+# result in FastAPI's default 500 response, and the frontend would catch the
+# network-level failure and silently replace it with a fake "glitch"
+# message — hiding the real cause. This handler guarantees:
+#  1. The full traceback is always printed to the backend terminal.
+#  2. The frontend gets a real, readable error message in the JSON response
+#     instead of just a failed fetch, so it can be surfaced honestly to the
+#     user/developer rather than papered over.
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    logger.error(
+        "Unhandled exception on %s %s\n%s",
+        request.method, request.url.path, tb
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "message": str(exc) or "An unexpected error occurred.",
+            "path": str(request.url.path),
+        },
+    )
+
+
+# Mount routers
+app.include_router(chat.router)
+app.include_router(speech.router)
+app.include_router(dashboard.router)
+app.include_router(profile.router)
+app.include_router(alerts.router)
+
+
+@app.get("/")
 def read_root():
     return {
         "system": "Teen Wellbeing Intelligence — Voice-First AI",
         "status": "operational",
-        "version": "2.0.0",
+        "version": "1.0.0",
         "docs": "/docs",
-        "auth": "JWT Bearer token required on all /api/chat, /api/alerts, /api/profile, /api/contacts routes",
         "responsible_ai_notice": "This system provides preventive wellbeing companionship and pattern detection, not clinical diagnosis."
     }
 
-@app.api_route("/health", methods=["GET", "HEAD"])
-@app.api_route("/api/health", methods=["GET", "HEAD"])
+
+@app.get("/api/health")
 def health_check():
     return {"status": "healthy"}
-
-

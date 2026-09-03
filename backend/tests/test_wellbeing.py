@@ -62,5 +62,88 @@ class TestWellbeingIntelligence(unittest.TestCase):
         self.assertGreater(len(resp["response_text"]), 10)
         self.assertIn("emotions_detected", resp)
 
+    def test_escalation_service_logged_only(self):
+        from database import SessionLocal
+        from services.escalation_service import EscalationService
+        from models.user import User
+        import uuid
+
+        db = SessionLocal()
+        try:
+            user = User(username=f"test_user_esc_{uuid.uuid4().hex[:8]}", display_name="Escalation Test User", country_code="IN")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+            res = EscalationService.handle_escalation(
+                db=db,
+                user_id=user.id,
+                conversation_id=None,
+                risk_level="HIGH_CONCERN",
+                reasons=["Test high concern situation"]
+            )
+            self.assertEqual(res.get("status"), "logged_only")
+        finally:
+            db.close()
+
+    def test_escalation_service_calle_mock(self):
+        from unittest.mock import patch, MagicMock
+        from database import SessionLocal
+        import services.escalation_service as esc_mod
+        from models.user import User
+        from models.escalation import Escalation
+        import uuid
+
+        db = SessionLocal()
+        try:
+            user = User(username=f"test_user_calle_{uuid.uuid4().hex[:8]}", display_name="Calle Test User", country_code="IN")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+            mock_call_result = {
+                "id": "call_mock_12345",
+                "task_completed": True,
+                "status": "completed",
+                "structured_result": {
+                    "counselor_reached": "yes",
+                    "acknowledged": "yes",
+                    "recommended_next_step": "dispatch_now",
+                    "notes": "Spoke with on-call counselor Jane. She is heading to room 204 immediately."
+                }
+            }
+
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.calls.create_and_wait.return_value = mock_call_result
+
+            with patch.object(esc_mod, "ESCALATION_ENABLED", True), \
+                 patch.object(esc_mod, "HELPLINE_ALERT_NUMBER", "+919876543210"), \
+                 patch.object(esc_mod, "calle_available", True), \
+                 patch.object(esc_mod, "CalleClient", return_value=mock_client):
+
+                res = esc_mod.EscalationService.handle_escalation(
+                    db=db,
+                    user_id=user.id,
+                    conversation_id=None,
+                    risk_level="IMMEDIATE_SAFETY",
+                    reasons=["Expressed immediate intent to self-harm"]
+                )
+
+                self.assertEqual(res.get("status"), "notified")
+                self.assertEqual(res.get("channel"), "calle")
+                self.assertEqual(res.get("call_id"), "call_mock_12345")
+                self.assertTrue(res.get("task_completed"))
+                self.assertEqual(res.get("structured_result")["recommended_next_step"], "dispatch_now")
+
+                # Verify database record
+                record = db.query(Escalation).filter(Escalation.user_id == user.id).first()
+                self.assertIsNotNone(record)
+                self.assertEqual(record.calle_call_id, "call_mock_12345")
+                self.assertTrue(record.calle_task_completed)
+                self.assertIn("dispatch_now", record.calle_structured_result)
+        finally:
+            db.close()
+
 if __name__ == "__main__":
     unittest.main()

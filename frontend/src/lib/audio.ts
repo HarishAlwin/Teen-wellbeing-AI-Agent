@@ -1,5 +1,5 @@
 /**
- * Audio Recording and Speech Utilities with Hands-Free Conversational Voice Loop
+ * Audio Recording and Speech Utilities
  */
 
 let mediaRecorder: MediaRecorder | null = null;
@@ -9,7 +9,7 @@ let activeAudioElement: HTMLAudioElement | null = null;
 export async function startRecording(): Promise<MediaStream> {
   audioChunks = [];
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
+  
   // Prefer webm or mp4 audio
   const mimeType = MediaRecorder.isTypeSupported("audio/webm")
     ? "audio/webm"
@@ -18,7 +18,7 @@ export async function startRecording(): Promise<MediaStream> {
     : "";
 
   mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-
+  
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
       audioChunks.push(event.data);
@@ -54,21 +54,26 @@ export function stopRecording(): Promise<Blob> {
 }
 
 /**
- * Native Web Speech API speech recognition with continuous listening
- * and optional silence auto-complete for hands-free speech communication.
+ * Native Web Speech API speech recognition for instant, low-latency live STT.
  *
- * Parameters:
- *  - onResult: called whenever new transcript is received
- *  - onError: called on non-fatal/fatal errors
- *  - onSpeechPause: called after silenceTimeoutMs of no speech when words were spoken
- *  - silenceTimeoutMs: delay in ms to trigger auto-submit (default: 1800ms)
+ * Previously this used `continuous = false`, which made the browser stop
+ * listening after the first short pause in speech (~3-4 seconds) — that was
+ * the root cause of "STT only transcribes for 3-4 seconds and doesn't
+ * continue." Fixed by:
+ *  1. Setting `continuous = true` so it doesn't stop on short pauses.
+ *  2. Accumulating the FINAL transcript across multiple result events,
+ *     since continuous mode fires many onresult events over a session
+ *     rather than one.
+ *  3. Auto-restarting recognition in `onend` if the user hasn't manually
+ *     stopped yet — some browsers (notably Chrome) still end a continuous
+ *     session after a long silence or ~60s even with continuous=true, so
+ *     auto-restart is what makes this reliably keep going until the user
+ *     taps stop.
  */
 export function startBrowserSpeechRecognition(
-  onResult: (transcript: string, isFinal: boolean) => void,
-  onError: (err: any) => void,
-  onSpeechPause?: (transcript: string) => void,
-  silenceTimeoutMs: number = 1800
-): { stop: () => void; getTranscript: () => string; resetTranscript: () => void } | null {
+  onResult: (transcript: string) => void,
+  onError: (err: any) => void
+): { stop: () => void } | null {
   const SpeechRecognition =
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -76,115 +81,60 @@ export function startBrowserSpeechRecognition(
     return null;
   }
 
-  let shouldListen = true;
-  let committedTranscript = "";
-  let currentInterim = "";
-  let recognition: any = null;
-  let silenceTimer: any = null;
+  let manuallyStopped = false;
+  let finalTranscript = "";
 
-  const resetSilenceTimer = () => {
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "en-US";
 
-    const fullText = (committedTranscript + " " + currentInterim).trim();
-    if (fullText.length > 0 && onSpeechPause && shouldListen) {
-      silenceTimer = setTimeout(() => {
-        const textToSubmit = (committedTranscript + " " + currentInterim).trim();
-        if (textToSubmit.length > 0 && shouldListen) {
-          onSpeechPause(textToSubmit);
-        }
-      }, silenceTimeoutMs);
+  recognition.onresult = (event: any) => {
+    let interimTranscript = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const chunk = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalTranscript += chunk + " ";
+      } else {
+        interimTranscript += chunk;
+      }
     }
+    onResult((finalTranscript + interimTranscript).trim());
   };
 
-  const createAndStart = () => {
-    if (!shouldListen) return;
-
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          committedTranscript += (committedTranscript ? " " : "") + result[0].transcript.trim();
-        } else {
-          interimTranscript += result[0].transcript;
-        }
-      }
-
-      currentInterim = interimTranscript;
-      const fullTranscript = (committedTranscript + " " + currentInterim).trim();
-      onResult(fullTranscript, interimTranscript === "");
-
-      // Reset auto-submit timer on new spoken words
-      resetSilenceTimer();
-    };
-
-    recognition.onerror = (event: any) => {
-      if (event.error === "no-speech") {
-        return;
-      }
-      if (event.error === "aborted") {
-        return;
-      }
+  recognition.onerror = (event: any) => {
+    // "no-speech" fires often in continuous mode during natural pauses —
+    // it isn't a real error, so don't bubble it up or it'll look like a
+    // failure on every pause between sentences.
+    if (event.error !== "no-speech") {
       onError(event.error);
-    };
-
-    recognition.onend = () => {
-      if (shouldListen) {
-        try {
-          recognition.start();
-        } catch {
-          setTimeout(() => {
-            if (shouldListen) {
-              try { createAndStart(); } catch { /* ignore */ }
-            }
-          }, 250);
-        }
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {
-      // ignore already started
     }
   };
 
-  createAndStart();
+  recognition.onend = () => {
+    // If the session ended on its own (browser timeout/silence) but the
+    // user hasn't tapped stop yet, restart it transparently so the
+    // teenager can keep talking without the mic silently going dead.
+    if (!manuallyStopped) {
+      try {
+        recognition.start();
+      } catch (e) {
+        // Already running or briefly unavailable — safe to ignore.
+      }
+    }
+  };
+
+  recognition.start();
 
   return {
     stop: () => {
-      shouldListen = false;
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
+      manuallyStopped = true;
+      try {
+        recognition.stop();
+      } catch (e) {
+        // ignore
       }
-      if (recognition) {
-        try {
-          recognition.stop();
-        } catch {
-          // ignore
-        }
-      }
-    },
-    getTranscript: () => (committedTranscript + " " + currentInterim).trim(),
-    resetTranscript: () => {
-      committedTranscript = "";
-      currentInterim = "";
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-      }
-    },
+    }
   };
 }
 
@@ -216,6 +166,7 @@ export function playSpokenResponse(
     };
 
     audio.onerror = () => {
+      // Fallback to browser synthesis on audio error
       speakWithBrowserTTS(fallbackText, onStart, onEnd);
     };
 
@@ -240,11 +191,11 @@ export function speakWithBrowserTTS(
   window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.98; // Natural conversational cadence
+  utterance.rate = 0.95; // Slightly slower, calming pace
   utterance.pitch = 1.0;
   utterance.lang = "en-US";
 
-  // Pick a warm natural voice if available
+  // Pick a warm voice if available
   const voices = window.speechSynthesis.getVoices();
   const naturalVoice = voices.find(
     (v) =>
