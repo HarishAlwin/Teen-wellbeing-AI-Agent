@@ -234,10 +234,6 @@ export interface AlertsResponse {
   count: number;
 }
 
-export async function getAuthHeaders(): Promise<Record<string, string>> {
-  return { "Content-Type": "application/json" };
-}
-
 export async function getAlerts(): Promise<AlertsResponse> {
   const res = await fetch(`${API_BASE}/alerts`);
   if (!res.ok) {

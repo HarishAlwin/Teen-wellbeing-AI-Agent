@@ -14,6 +14,7 @@ logger = logging.getLogger("aura.llm_agent")
 try:
     import google.generativeai as genai
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         genai.configure(api_key=GEMINI_API_KEY)
         llm_available = True
@@ -21,6 +22,7 @@ try:
         llm_available = False
 except ImportError:
     genai = None
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     llm_available = False
 
 VALID_RISK_LEVELS = {"NORMAL", "CONCERNING", "HIGH_CONCERN", "IMMEDIATE_SAFETY"}
@@ -186,7 +188,7 @@ class LLMAgent:
             results, tool_fns = _build_tools(active_patterns)
 
             model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
+                model_name=GEMINI_MODEL,
                 system_instruction=AGENTIC_SYSTEM_PROMPT,
                 tools=tool_fns,
             )
@@ -223,7 +225,7 @@ class LLMAgent:
         if llm_available and genai:
             try:
                 model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
+                    model_name=GEMINI_MODEL,
                     system_instruction=SYSTEM_PROMPT,
                     generation_config={"response_mime_type": "application/json", "temperature": 0.7}
                 )
@@ -244,7 +246,7 @@ Teenager says:
                 parsed = json.loads(response.text)
                 return cls._sanitize_llm_output(parsed)
             except Exception as e:
-                logger.warning("Gemini call failed, using intelligent fallback: %s", e)
+                logger.exception("Gemini call failed, using intelligent fallback: %s", e)
 
         # Intelligent deterministic fallback
         return cls._fallback_response(user_message, current_scores, active_patterns, risk_level, safety_guidance)

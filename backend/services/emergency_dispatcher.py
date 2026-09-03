@@ -19,7 +19,7 @@ import httpx
 logger = logging.getLogger("emergency_dispatcher")
 
 EMERGENCY_DISPATCH_PHONE_NUMBER = os.getenv("EMERGENCY_DISPATCH_PHONE_NUMBER", "")
-EMERGENCY_AUTO_CALL_ENABLED = os.getenv("EMERGENCY_AUTO_CALL_ENABLED", "true").lower() in ("true", "1", "yes")
+EMERGENCY_AUTO_CALL_ENABLED = os.getenv("EMERGENCY_AUTO_CALL_ENABLED", "false").lower() in ("true", "1", "yes")
 
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
@@ -32,7 +32,7 @@ class EmergencyDispatcher:
     """
 
     EMERGENCY_DISPATCH_PHONE_NUMBER = os.getenv("EMERGENCY_DISPATCH_PHONE_NUMBER", "")
-    EMERGENCY_AUTO_CALL_ENABLED = os.getenv("EMERGENCY_AUTO_CALL_ENABLED", "true").lower() in ("true", "1", "yes")
+    EMERGENCY_AUTO_CALL_ENABLED = os.getenv("EMERGENCY_AUTO_CALL_ENABLED", "false").lower() in ("true", "1", "yes")
 
     @classmethod
     def format_phone_number(cls, phone: str) -> str:

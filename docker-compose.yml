@@ -23,6 +23,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/teen_wellbeing
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-ksryVoNAGZT8GxWCTiVm}
